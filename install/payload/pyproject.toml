@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ocode"
+version = "0.5.1"
+description = "TUI para gestionar instancias Docker de OpenCode por proyecto"
+requires-python = ">=3.11"
+dependencies = [
+    "textual>=0.89",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ocode"]

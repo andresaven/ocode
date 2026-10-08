@@ -1,0 +1,50 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "read": {
+      "*src/main/resources/configuration/des*": "deny",
+      "*src/main/resources/configuration/pre*": "deny",
+      "*src/main/resources/configuration/prod*": "deny",
+      "*src/main/resources/certs*": "deny",
+      "*src/main/resources/application-desa.yaml*": "deny",
+      "*src/main/resources/application-pre.yaml*": "deny",
+      "*src/main/resources/application-pro.yaml*": "deny",
+      "*src/main/resources/db/production*": "deny",
+      "*src/main/resources/db/db.changelog-desa.yaml*": "deny",
+      "*src/main/resources/db/db.changelog-pre.yaml*": "deny",
+      "*src/main/resources/db/liquibase-desa.properties*": "deny",
+      "*src/main/resources/db/liquibase-pre.properties*": "deny",
+      "*k8s*": "deny"
+    },
+    "edit": {
+      "*src/main/resources/configuration/des*": "deny",
+      "*src/main/resources/configuration/pre*": "deny",
+      "*src/main/resources/configuration/prod*": "deny",
+      "*src/main/resources/certs*": "deny",
+      "*src/main/resources/application-desa.yaml*": "deny",
+      "*src/main/resources/application-pre.yaml*": "deny",
+      "*src/main/resources/application-pro.yaml*": "deny",
+      "*src/main/resources/db/production*": "deny",
+      "*src/main/resources/db/db.changelog-desa.yaml*": "deny",
+      "*src/main/resources/db/db.changelog-pre.yaml*": "deny",
+      "*src/main/resources/db/liquibase-desa.properties*": "deny",
+      "*src/main/resources/db/liquibase-pre.properties*": "deny",
+      "*k8s*": "deny"
+    },
+    "list": {
+      "*src/main/resources/configuration/des*": "deny",
+      "*src/main/resources/configuration/pre*": "deny",
+      "*src/main/resources/configuration/prod*": "deny",
+      "*src/main/resources/certs*": "deny",
+      "*src/main/resources/application-desa.yaml*": "deny",
+      "*src/main/resources/application-pre.yaml*": "deny",
+      "*src/main/resources/application-pro.yaml*": "deny",
+      "*src/main/resources/db/production*": "deny",
+      "*src/main/resources/db/db.changelog-desa.yaml*": "deny",
+      "*src/main/resources/db/db.changelog-pre.yaml*": "deny",
+      "*src/main/resources/db/liquibase-desa.properties*": "deny",
+      "*src/main/resources/db/liquibase-pre.properties*": "deny",
+      "*k8s*": "deny"
+    }
+  }
+}
