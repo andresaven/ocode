@@ -1,4 +1,4 @@
-# ocode 0.5.1
+# ocode 0.6.0
 
 ocode es una aplicación con interfaz de terminal (TUI) para gestionar instancias
 de OpenCode en contenedores Linux, organizadas por proyecto y working copy.
