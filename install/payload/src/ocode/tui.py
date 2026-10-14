@@ -14,6 +14,7 @@ from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.command import CommandPalette
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.coordinate import Coordinate
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
@@ -427,6 +428,7 @@ class SensitivePathsScreen(SaveRecreateScreen):
     #protection-report { height: auto; border: round $primary; padding: 1 2; }
     #addrow { height: 3; }
     #protection-navigation { height: 3; }
+    #back { width: auto; margin-bottom: 1; }
     #save { width: auto; }
     .hint { color: $text-muted; margin-bottom: 1; }
     """
@@ -441,6 +443,7 @@ class SensitivePathsScreen(SaveRecreateScreen):
         self.draft = replace(project, sensitive_paths=list(project.sensitive_paths))
 
         yield Header()
+        yield Button("← Volver", id="back", variant="primary")
         yield Label(
             f"Protección de archivos · {project.name} / {project.branch}",
             classes="title",
@@ -449,7 +452,6 @@ class SensitivePathsScreen(SaveRecreateScreen):
             yield from self._protection_content(project)
 
         with Horizontal(id="protection-navigation"):
-            yield Button("Volver", id="back")
             yield Button("Guardar y recrear contenedor", id="save", variant="warning")
 
         yield Footer()
@@ -594,6 +596,7 @@ class ProjectSettingsScreen(SaveRecreateScreen):
     #settings-content { height: 1fr; }
     #settings-content Horizontal { height: 3; }
     #settings-navigation { height: 3; }
+    #back { width: auto; margin-bottom: 1; }
     #save { width: auto; }
     .field { margin-bottom: 1; }
     .hint { color: $text-muted; margin-bottom: 1; }
@@ -612,12 +615,12 @@ class ProjectSettingsScreen(SaveRecreateScreen):
         ]
 
         yield Header()
+        yield Button("← Volver", id="back", variant="primary")
         yield Label(f"Configurar · {p.name} / {p.branch}", classes="title")
 
         with VerticalScroll(id="settings-content"):
             yield from self._settings_content(p, runtimes)
         with Horizontal(id="settings-navigation"):
-            yield Button("Volver", id="back")
             yield Button("Guardar y recrear contenedor", id="save", variant="warning")
         yield Footer()
 
@@ -698,6 +701,7 @@ class ProjectStorageScreen(Screen):
     #storage-scroll { height: 1fr; }
     #storage-report { height: auto; }
     #storage-navigation { height: 3; }
+    #storage-back { width: auto; margin-bottom: 1; }
     """
 
     def __init__(self, project_id: str):
@@ -706,12 +710,12 @@ class ProjectStorageScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Button("← Volver", id="storage-back", variant="primary")
         yield Label("Almacenamiento · contenedor y host", classes="title")
         with VerticalScroll(id="storage-scroll"):
             yield Static("Consultando montajes…", id="storage-report", markup=False)
         with Horizontal(id="storage-navigation"):
             yield Button("Actualizar", id="storage-refresh")
-            yield Button("Volver", id="storage-back")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -744,10 +748,12 @@ class JavaScreen(Screen):
     JavaScreen { padding: 1 3; }
     #runtimes { height: 1fr; }
     .hint { color: $text-muted; margin-bottom: 1; }
+    #back { width: auto; margin-bottom: 1; }
     """
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Button("← Volver", id="back", variant="primary")
         yield Label("Java", classes="title")
         yield Static("Maven y npm ya vienen instalados en todos los runtimes.", classes="hint")
 
@@ -767,7 +773,6 @@ class JavaScreen(Screen):
 
         with Horizontal():
             yield Button("Construir seleccionado", id="build", variant="success")
-            yield Button("Volver", id="back")
         yield Footer()
 
     @on(Button.Pressed, "#build")
@@ -826,6 +831,7 @@ class ProjectScreen(Screen):
     #danger-zone { border: round $error; }
     #instance-status { height: auto; margin-bottom: 1; }
     #navigation { height: auto; }
+    #back { width: auto; margin-bottom: 1; }
     """
 
     def __init__(self, project_id: str):
@@ -838,6 +844,7 @@ class ProjectScreen(Screen):
     def compose(self) -> ComposeResult:
         p = self.project()
         yield Header()
+        yield Button("← Volver", id="back", variant="primary")
         yield Label(f"Gestionar instancia · {p.name} / {p.branch}", classes="title")
         with VerticalScroll(id="instance-content"):
             yield Static(self._summary(), id="info", markup=False)
@@ -881,8 +888,6 @@ class ProjectScreen(Screen):
                 )
                 with Horizontal():
                     yield Button("Eliminar instancia", id="delete-instance", variant="error")
-        with Horizontal(id="navigation"):
-            yield Button("Volver", id="back")
         yield Footer()
 
     def _summary(self) -> str:
@@ -1457,7 +1462,7 @@ class MainScreen(Screen):
         yield Label("ocode · instancias OpenCode", classes="title")
 
         table = DataTable(id="projects")
-        table.add_columns("Proyecto", "Rama", "Java", "Working copy")
+        table.add_columns("Proyecto", "Rama", "Java", "Estado", "Puerto", "Working copy")
         for p in self.app.store.list_projects():
             profile = self.app.global_cfg.runtimes.get(p.runtime)
             java = profile.java if profile else p.runtime
@@ -1465,6 +1470,8 @@ class MainScreen(Screen):
                 p.name,
                 p.branch,
                 java,
+                "Consultando…",
+                str(p.port),
                 p.workspace,
                 key=p.project_id,
             )
@@ -1479,6 +1486,38 @@ class MainScreen(Screen):
             yield Button("Diagnóstico", id="doctor")
             yield Button("Config global", id="global-config")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self.refresh_instance_statuses()
+
+    def on_screen_resume(self) -> None:
+        self.refresh_instance_statuses()
+
+    @work(exclusive=True, group="instance-statuses")
+    async def refresh_instance_statuses(self) -> None:
+        table = self.query_one("#projects", DataTable)
+        projects = self.app.store.list_projects()
+        labels = {
+            "absent": "Sin iniciar",
+            "running": "En ejecución",
+            "exited": "Detenida",
+            "created": "Detenida",
+            "paused": "En pausa",
+            "restarting": "Reiniciándose",
+            "dead": "Error",
+            "removing": "Eliminándose",
+        }
+        for row, project in enumerate(projects):
+            try:
+                status = await asyncio.to_thread(
+                    container_status,
+                    self.app.global_cfg,
+                    project.container_name,
+                )
+                label = labels.get(status, status)
+            except Exception:
+                label = "No disponible"
+            table.update_cell_at(Coordinate(row, 3), label)
 
     def selected_project(self) -> str | None:
         table = self.query_one("#projects", DataTable)
