@@ -18,6 +18,7 @@ from ocode.tui import (
     SensitivePathsScreen,
 )
 from textual.widgets import Button, Input, Label, ListView, Static
+from textual.coordinate import Coordinate
 
 
 class ContainerStatusTests(unittest.TestCase):
@@ -74,6 +75,17 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
         store.list_projects.return_value = [project]
         store.get_project.return_value = project
         return OcodeApp(store, Mock())
+
+    async def test_main_screen_refreshes_status_by_cell_coordinate(self):
+        app = self.make_app()
+        with patch("ocode.tui.container_status", return_value="exited"):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                table = app.screen.query_one("#projects")
+                self.assertEqual(
+                    table.get_cell_at(Coordinate(0, 3)),
+                    "Detenida",
+                )
 
     def mock_launch(self, app, *, reused=False):
         stack = ExitStack()
