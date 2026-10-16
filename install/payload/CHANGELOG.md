@@ -1,11 +1,19 @@
 # Cambios
 
-## Próxima versión
+## 0.8.0
 
+- La paleta `Ctrl+P` queda reservada para los atajos; las acciones pasan al
+  menú Opciones contextual.
+- Opciones permite abrir AGENTS.md, opencode.jsonc y Skills generales o del
+  proyecto según la pantalla, además de sensitive-paths.txt y almacenamiento.
+- La vista de almacenamiento permite abrir la working copy en Windows y
+  recorrer directorios del contenedor en modo de solo lectura.
 - Skills globales y por instancia fuera de la working copy; las skills del
   proyecto se pueden editar desde OpenCode.
 - El AGENTS específico de la instancia se puede editar desde el contenedor y
   queda diferenciado del AGENTS propio del repositorio.
+
+## Próxima versión
 
 ## 0.7.1
 

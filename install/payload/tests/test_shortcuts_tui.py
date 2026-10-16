@@ -11,7 +11,10 @@ from textual.widgets import Input, Static
 
 from ocode.model import ContainerRuntime, GlobalConfig, ProjectConfig
 from ocode.paths import Paths
-from ocode.tui import ProjectStorageScreen, ConfirmScreen, MessageScreen, OcodeApp, ProjectSettingsScreen
+from ocode.tui import (
+    ProjectStorageScreen, ConfirmScreen, MainScreen, MessageScreen, OcodeApp,
+    OptionsScreen, ProjectSettingsScreen,
+)
 
 
 class ShortcutTests(unittest.IsolatedAsyncioTestCase):
@@ -26,18 +29,12 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
         store.get_project.return_value = project
         return OcodeApp(store, Paths(home))
 
-    async def test_palette_label_and_only_requested_commands(self):
+    async def test_palette_contains_only_real_shortcuts(self):
         with tempfile.TemporaryDirectory() as directory:
             app = self.make_app(Path(directory))
             async with app.run_test() as pilot:
                 commands = list(app.get_system_commands(app.screen))
-                self.assertEqual(len(commands), 10)
-                self.assertEqual(commands[0].title, "Salir")
-                self.assertEqual(commands[-2].title, "Buscar actualizaciones")
-                self.assertEqual(
-                    commands[-1].title, "Desactivar comprobación automática"
-                )
-                self.assertNotIn("Theme", [command.title for command in commands])
+                self.assertEqual([command.title for command in commands], ["Salir · q"])
                 self.assertEqual(app.active_bindings["ctrl+p"].binding.description, "Atajos")
                 self.assertFalse(app.active_bindings["ctrl+p"].binding.show)
                 await pilot.press("ctrl+p")
@@ -45,36 +42,57 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(app.screen, CommandPalette)
                 self.assertEqual(app.screen.query_one(Input).placeholder, "Buscar atajos…")
 
-    async def test_configuration_files_open_in_host(self):
+    async def test_options_are_contextual_and_open_configuration_and_skills(self):
         with tempfile.TemporaryDirectory() as directory:
             app = self.make_app(Path(directory))
             paths = app.paths
-            expected = [
-                paths.global_agents, paths.opencode_config,
-                paths.project_agents("demo"), paths.project_config("demo"),
-                paths.project_sensitive_paths("demo"),
-            ]
+            expected = [paths.global_agents, paths.opencode_config, paths.global_skills]
             for path in expected:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.touch()
+                if path.suffix:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+                else:
+                    path.mkdir(parents=True, exist_ok=True)
+            project_paths = [
+                paths.project_agents("demo"), paths.project_config("demo"),
+                paths.project_skills("demo"), paths.project_sensitive_paths("demo"),
+            ]
+            for path in project_paths:
+                if path.suffix:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+                else:
+                    path.mkdir(parents=True, exist_ok=True)
             with patch("ocode.tui.os.startfile", create=True) as startfile:
                 async with app.run_test():
-                    commands = list(app.get_system_commands(app.screen))
-                    for command in commands[1:6]:
-                        command.callback()
-                    self.assertEqual([call.args[0] for call in startfile.call_args_list], expected)
+                    self.assertIsInstance(app.screen, MainScreen)
+                    self.assertEqual(
+                        [target for _, target in app.option_items(None)],
+                        ["global_agents", "global_config", "global_skills", "updates", "update", "quit"],
+                    )
+                    for target in ("global_agents", "global_config", "global_skills"):
+                        app.perform_option(target, None)
+                    project_options = app.option_items("demo")
+                    self.assertIn(("Abrir Skills del proyecto", "skills"), project_options)
+                    self.assertIn(("Abrir sensitive-paths.txt del proyecto", "sensitive"), project_options)
+                    self.assertNotIn(("Abrir AGENTS.md general", "global_agents"), project_options)
+                    for target in ("agents", "config", "skills", "sensitive"):
+                        app.perform_option(target, "demo")
+                    self.assertEqual(
+                        [call.args[0] for call in startfile.call_args_list],
+                        expected + project_paths,
+                    )
                     app.store.save_project.assert_not_called()
 
-    async def test_shortcut_opens_storage_mapping_view(self):
+    async def test_options_open_storage_mapping_view(self):
         with tempfile.TemporaryDirectory() as directory:
             app = self.make_app(Path(directory))
             with patch("ocode.tui.storage_report", return_value="Correspondencias de montajes") as report, \
                  patch("ocode.tui.os.startfile", create=True) as startfile:
                 async with app.run_test() as pilot:
-                    commands = list(app.get_system_commands(app.screen))
-                    commands[6].callback()
+                    app.open_project_path("demo", "storage")
                     await pilot.pause()
-                    self.assertEqual(commands[6].title, "Ver almacenamiento del proyecto")
+                    self.assertEqual(app.screen.project_id, "demo")
                     self.assertIsInstance(app.screen, ProjectStorageScreen)
                     await app.screen.workers.wait_for_complete()
                     report.assert_called_once_with(
@@ -83,13 +101,16 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("Correspondencias", str(app.screen.query_one("#storage-report", Static).render()))
                     startfile.assert_not_called()
 
-    async def test_project_settings_take_precedence(self):
+    async def test_project_settings_options_resolve_project_context(self):
         with tempfile.TemporaryDirectory() as directory:
             app = self.make_app(Path(directory))
             async with app.run_test() as pilot:
                 app.push_screen(ProjectSettingsScreen("other"))
                 await pilot.pause()
-                self.assertEqual(app.shortcut_project(app.screen), "other")
+                app.open_options(app.screen)
+                await pilot.pause()
+                self.assertIsInstance(app.screen, OptionsScreen)
+                self.assertEqual(app.screen.project_id, "other")
 
     async def test_storage_view_refreshes_and_keeps_navigation_visible(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -116,13 +137,12 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
             app.store.list_projects.return_value = []
             with patch("ocode.tui.os.startfile", create=True) as startfile:
                 async with app.run_test() as pilot:
-                    commands = list(app.get_system_commands(app.screen))
-                    commands[3].callback()
+                    app.open_project_path(None, "agents")
                     await pilot.pause()
                     self.assertIsInstance(app.screen, MessageScreen)
                     self.assertIn("Selecciona", app.screen.message)
                     app.pop_screen()
-                    commands[1].callback()
+                    app.open_host_path(app.paths.global_agents)
                     await pilot.pause()
                     self.assertIn("No existe", app.screen.message)
                     startfile.assert_not_called()

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ocode.model import ContainerRuntime, GlobalConfig, ProjectConfig
 from ocode.paths import Paths
-from ocode.storage import host_mount_path, storage_report
+from ocode.storage import container_directories, host_mount_path, storage_report
 
 
 class StorageReportTests(unittest.TestCase):
@@ -73,3 +73,21 @@ class StorageReportTests(unittest.TestCase):
         self.assertEqual(host_mount_path("/var/lib/docker/volumes/data/_data"),
                          "/var/lib/docker/volumes/data/_data")
         self.assertEqual(host_mount_path("/mnt/projects/ocode"), "/mnt/projects/ocode")
+
+    def test_container_directory_listing_is_read_only_and_requires_running_instance(self):
+        with patch("ocode.storage.container_running", return_value=True), \
+             patch("ocode.storage.resolve_engine") as resolve, \
+             patch("ocode.storage.subprocess.run", return_value=
+                   subprocess.CompletedProcess([], 0, "/etc/alternatives\n/etc/ssl\n", "")) as run:
+            resolve.return_value.command = ["docker"]
+            directories = container_directories(self.cfg, self.project, "/etc")
+        self.assertEqual(directories, ["/etc/alternatives", "/etc/ssl"])
+        self.assertEqual(run.call_args.args[0], [
+            "docker", "exec", self.project.container_name, "find", "/etc",
+            "-mindepth", "1", "-maxdepth", "1", "-type", "d", "-print",
+        ])
+
+    def test_container_directory_listing_does_not_start_stopped_instance(self):
+        with patch("ocode.storage.container_running", return_value=False):
+            with self.assertRaisesRegex(Exception, "no se iniciará"):
+                container_directories(self.cfg, self.project, "/")
