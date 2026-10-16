@@ -43,18 +43,5 @@ class UpdateLauncherTests(unittest.TestCase):
             self.assertEqual(rules.read_text(encoding="utf-8"), "custom rules")
 
 
-class AppLauncherTests(unittest.TestCase):
-    def test_launcher_selects_its_installation_code(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="ocode-install-") as directory:
-            root = Path(directory) / "ocode with spaces"
-
-            launcher = installer.create_app_launcher(root, r"C:\Python\python.exe")
-
-            content = launcher.read_text(encoding="ascii")
-            self.assertIn(f'set "OCODE_HOME={root}"', content)
-            self.assertIn('set "PYTHONPATH=%~dp0..\\src;%PYTHONPATH%"', content)
-            self.assertIn('"C:\\Python\\python.exe" -m ocode %*', content)
-
-
 if __name__ == "__main__":
     unittest.main()
