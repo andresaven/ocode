@@ -1,6 +1,6 @@
 # Cambios
 
-## Sin publicar
+## 0.7.0
 
 - ocode comprueba al iniciar si hay una versión nueva en GitHub y permite
   actualizar desde la TUI: descarga el paquete, lo extrae en la carpeta de
