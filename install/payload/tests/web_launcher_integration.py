@@ -48,6 +48,8 @@ class WebLauncherIntegration(unittest.IsolatedAsyncioTestCase):
             store = Store(paths)
             cfg = store.initialize()
             cfg.container_runtime = ContainerRuntime(kind="docker")
+            # Keep the integration hermetic: no GitHub calls or update prompts.
+            cfg.check_updates = False
             store.save_global(cfg)
             workspace = paths.home / "workspace"
             workspace.mkdir()

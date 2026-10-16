@@ -420,21 +420,30 @@ y la ruta de la working copy antes de eliminar datos.
 
 ## Actualizar
 
-Para instalar una futura distribución, cierra ocode, descomprímela sobre
-la misma carpeta y ejecuta:
+ocode comprueba al iniciar si hay una versión nueva publicada en GitHub y, sin
+bloquear la TUI, muestra un aviso con la versión disponible y sus notas. Desde
+el aviso puedes descargar e instalar la actualización o **Omitir esta versión**.
+La descarga usa el ZIP de código fuente del tag de la release; si aún no hay una
+release publicada, se tiene en cuenta el tag estable más alto.
+
+Para actualizar manualmente, cierra ocode, descomprime la distribución sobre la
+misma carpeta y ejecuta:
 
 ```powershell
 cd C:\entorno_desarrollo\ocode
 .\update.cmd
 ```
 
-También puedes extraer primero la distribución y elegir **Actualizar ocode**
-en la paleta de atajos. Tras confirmar, se abre `update.cmd` y se cierra ocode.
+También puedes elegir **Buscar actualizaciones** en la paleta de atajos para
+comprobarlo en cualquier momento, **Actualizar ocode** para abrir `update.cmd`
+tras cerrar ocode, o **Desactivar comprobación automática** para que ocode no
+avise al iniciar. El ajuste equivalente en `config\config.json` es
+`check_updates`.
 
-El comando reutiliza `install\install.cmd` y `install\payload\`;
-no descarga versiones ni programa actualizaciones automáticas. Conserva
-la configuración activa, proyectos, contenedores y volúmenes persistentes.
-Las instancias siguen funcionando y no se recrean automáticamente.
+La actualización descarga el paquete, lo extrae en la carpeta de instalación y
+reutiliza `install\install.cmd` y `install\payload\`. Conserva la configuración
+activa, proyectos, contenedores y volúmenes persistentes. Las instancias siguen
+funcionando y no se recrean automáticamente.
 
 Si necesitas aplicar una imagen o unos montajes distintos, prepara el
 runtime y utiliza **Guardar y recrear contenedor** en la instancia.

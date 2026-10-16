@@ -1,5 +1,13 @@
 # Cambios
 
+## Sin publicar
+
+- ocode comprueba al iniciar si hay una versión nueva en GitHub y permite
+  actualizar desde la TUI: descarga el paquete, lo extrae en la carpeta de
+  instalación, lanza `update.cmd` y cierra ocode.
+- La comprobación automática se puede desactivar y cada versión avisada se
+  puede omitir. La paleta de atajos añade **Buscar actualizaciones**.
+
 ## 0.6.0
 
 - El listado de instancias muestra su estado y puerto.
