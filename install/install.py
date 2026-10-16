@@ -128,6 +128,20 @@ def create_update_launcher(root: Path) -> Path:
     return launcher
 
 
+def create_app_launcher(root: Path, python: str) -> Path:
+    launcher = root / "app" / "bin" / "ocode.cmd"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text(
+        "@echo off\r\n"
+        "setlocal\r\n"
+        f'set "OCODE_HOME={root}"\r\n'
+        'set "PYTHONPATH=%~dp0..\\src;%PYTHONPATH%"\r\n'
+        f'"{python}" -m ocode %*\r\n',
+        encoding="ascii",
+    )
+    return launcher
+
+
 def main() -> int:
     install_dir = Path(__file__).resolve().parent
     root = install_dir.parent
@@ -202,13 +216,7 @@ def main() -> int:
             f"pip returned exit code {cp.returncode}"
         )
 
-    launcher = bin_dir / "ocode.cmd"
-    launcher.write_text(
-        "@echo off\r\n"
-        f"set OCODE_HOME={root}\r\n"
-        f"\"{sys.executable}\" -m ocode %*\r\n",
-        encoding="ascii",
-    )
+    launcher = create_app_launcher(root, sys.executable)
     log(f"Launcher created: {launcher}")
 
     defaults = app / "defaults"

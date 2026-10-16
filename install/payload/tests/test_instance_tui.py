@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 from contextlib import ExitStack
 import sys
@@ -89,6 +90,59 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                     table.get_cell_at(Coordinate(0, 3)),
                     "Detenida",
                 )
+
+    async def test_status_refresh_ignores_projects_not_in_the_table(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        added = ProjectConfig("added", "Nuevo", "rama", ".")
+        with patch("ocode.tui.container_status", return_value="exited") as status:
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.store.list_projects.return_value = [added, project]
+                await app.screen.refresh_instance_statuses().wait()
+                table = app.screen.query_one("#projects")
+                self.assertEqual(table.get_cell_at(Coordinate(0, 3)), "Detenida")
+                status.assert_called_with(app.global_cfg, project.container_name)
+
+    async def test_main_screen_shows_project_created_while_adding(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        added = ProjectConfig("added", "Nuevo", "rama", ".")
+        with patch("ocode.tui.container_status", return_value="absent"):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.screen.add()
+                await pilot.pause()
+                app.store.list_projects.return_value = [project, added]
+                app.pop_screen()
+                await pilot.pause()
+                table = app.screen.query_one("#projects")
+                self.assertEqual(table.row_count, 2)
+                self.assertEqual(table.get_row("added")[0], "Nuevo")
+                self.assertEqual(table.get_row("added")[3], "Sin iniciar")
+
+    async def test_status_refresh_skips_row_removed_during_query(self):
+        app = self.make_app()
+        with patch("ocode.tui.container_status", return_value="exited"):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                screen = app.screen
+                table = screen.query_one("#projects")
+                querying = asyncio.Event()
+                resume = asyncio.Event()
+
+                async def delayed_query(func, *args):
+                    querying.set()
+                    await resume.wait()
+                    return "exited"
+
+                with patch("ocode.tui.asyncio.to_thread", side_effect=delayed_query):
+                    worker = screen.refresh_instance_statuses()
+                    await querying.wait()
+                    table.remove_row("demo")
+                    resume.set()
+                    await worker.wait()
+                self.assertEqual(table.row_count, 0)
 
     def mock_launch(self, app, *, reused=False):
         stack = ExitStack()
@@ -370,8 +424,10 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 app.push_screen(ProjectSettingsScreen("demo"))
                 await pilot.pause()
                 labels = [str(label.render()) for label in app.screen.query(Label)]
-                self.assertIn("Cargar AGENTS.md específico (fuera del workspace)", labels)
+                self.assertIn("Cargar AGENTS.md específico editable (fuera del workspace)", labels)
                 self.assertIn("Cargar opencode.jsonc específico (fuera del workspace)", labels)
+                app.screen.query_one("#settings-content").scroll_end(animate=False)
+                await pilot.pause()
                 await pilot.click("#open-config")
                 open_directory.assert_called_once_with(app.paths.project_dir.return_value)
                 app.paths.project_dir.assert_called_once_with("demo")
@@ -383,6 +439,8 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
         with patch("ocode.tui.os.startfile", create=True, side_effect=OSError("No se puede abrir")):
             async with app.run_test(size=(100, 40)) as pilot:
                 app.push_screen(ProjectSettingsScreen("demo"))
+                await pilot.pause()
+                app.screen.query_one("#settings-content").scroll_end(animate=False)
                 await pilot.pause()
                 await pilot.click("#open-config")
                 self.assertIsInstance(app.screen, MessageScreen)

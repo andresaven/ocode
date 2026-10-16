@@ -1,12 +1,37 @@
 """Describe storage mappings without reading files or container configuration."""
 
 import json
+from pathlib import PurePosixPath
 from pathlib import PureWindowsPath
 import subprocess
 
-from .docker import DockerError, resolve_engine
+from .docker import DockerError, container_running, resolve_engine
 from .model import GlobalConfig, ProjectConfig
 from .paths import Paths
+
+
+def container_directories(cfg: GlobalConfig, project: ProjectConfig, directory: str) -> list[str]:
+    """List immediate container directories without reading file contents."""
+    path = PurePosixPath(directory)
+    if not path.is_absolute() or ".." in path.parts:
+        raise ValueError("La ruta del contenedor debe ser absoluta y no contener '..'.")
+    if not container_running(cfg, project.container_name):
+        raise DockerError("La instancia está detenida; no se iniciará para explorarla.")
+    engine = resolve_engine(cfg)
+    try:
+        result = subprocess.run(
+            engine.command + [
+                "exec", project.container_name, "find", str(path),
+                "-mindepth", "1", "-maxdepth", "1", "-type", "d", "-print",
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise DockerError(f"No se pudieron consultar los directorios: {exc}") from exc
+    if result.returncode:
+        raise DockerError(result.stderr.strip() or "No se pudo consultar el directorio.")
+    return sorted(line for line in result.stdout.splitlines() if line)
 
 
 def host_mount_path(source: str) -> str:
