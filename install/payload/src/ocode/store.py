@@ -316,6 +316,7 @@ class Store:
         runtime: str,
         default_mode: str,
         port: int,
+        maven_repository: str = "",
     ) -> ProjectConfig:
         project_id = str(uuid.uuid4())
         project = ProjectConfig(
@@ -326,6 +327,7 @@ class Store:
             runtime=runtime,
             default_mode=default_mode,
             port=port,
+            maven_repository=maven_repository,
             sensitive_paths=list(BUILTIN_SENSITIVE_PATHS),
         )
 

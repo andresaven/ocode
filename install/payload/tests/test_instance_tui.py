@@ -10,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ocode import docker
 from ocode.model import ContainerRuntime, GlobalConfig, ProjectConfig
 from ocode.tui import (
+    AddProjectScreen,
     ConfirmScreen,
+    JavaScreen,
     MessageScreen,
     OcodeApp,
     ProjectScreen,
@@ -18,6 +20,7 @@ from ocode.tui import (
     SensitivePathsScreen,
 )
 from textual.widgets import Button, Input, Label, ListView, Static
+from textual.coordinate import Coordinate
 
 
 class ContainerStatusTests(unittest.TestCase):
@@ -74,6 +77,17 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
         store.list_projects.return_value = [project]
         store.get_project.return_value = project
         return OcodeApp(store, Mock())
+
+    async def test_main_screen_refreshes_status_by_cell_coordinate(self):
+        app = self.make_app()
+        with patch("ocode.tui.container_status", return_value="exited"):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                table = app.screen.query_one("#projects")
+                self.assertEqual(
+                    table.get_cell_at(Coordinate(0, 3)),
+                    "Detenida",
+                )
 
     def mock_launch(self, app, *, reused=False):
         stack = ExitStack()
@@ -407,6 +421,79 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                     paths=app.paths, global_cfg=app.global_cfg, project=saved,
                 )
                 self.assertIsInstance(app.screen, MessageScreen)
+
+    async def test_settings_maven_repository_requires_existing_directory(self):
+        app = self.make_app()
+        with patch("ocode.tui.recreate_container") as recreate:
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(ProjectSettingsScreen("demo"))
+                await pilot.pause()
+                app.screen.query_one("#maven-repository", Input).value = "/missing/repository"
+                await pilot.click("#save")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                app.store.save_project.assert_not_called()
+                recreate.assert_not_called()
+
+    async def test_java_default_prefills_new_instance_and_can_be_overridden(self):
+        from tempfile import TemporaryDirectory
+
+        app = self.make_app()
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            repository = root / ".m2" / "repository"
+            repository.mkdir(parents=True)
+            other = root / "otro" / "repository"
+            other.mkdir(parents=True)
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(JavaScreen())
+                await pilot.pause()
+                app.screen.query_one("#default-maven-repository", Input).value = str(repository)
+                await pilot.click("#save-maven")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                self.assertEqual(app.global_cfg.default_maven_repository, str(repository))
+                app.store.save_global.assert_called_once_with(app.global_cfg)
+                app.pop_screen()
+                app.push_screen(AddProjectScreen())
+                await pilot.pause()
+                self.assertEqual(app.screen.query_one("#maven-repository", Input).value,
+                                 str(repository))
+                app.screen.query_one("#maven-repository", Input).value = str(other)
+                app.screen.query_one("#workspace", Input).value = str(root)
+                with patch.object(app, "open_project"):
+                    await pilot.click("#save")
+                    await pilot.pause()
+                self.assertEqual(app.store.create_project.call_args.kwargs["maven_repository"],
+                                 str(other))
+
+    async def test_java_default_rejects_invalid_path_without_saving(self):
+        app = self.make_app()
+        async with app.run_test(size=(100, 40)) as pilot:
+            app.push_screen(JavaScreen())
+            await pilot.pause()
+            app.screen.query_one("#default-maven-repository", Input).value = "/missing/repository"
+            await pilot.click("#save-maven")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, MessageScreen)
+            app.store.save_global.assert_not_called()
+
+    async def test_java_maven_navigation_and_section_order(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            menu = app.screen.query_one("#java", Button)
+            self.assertEqual(str(menu.label), "Java / Maven")
+            await pilot.click("#java")
+            await pilot.pause()
+            screen = app.screen
+            self.assertIsInstance(screen, JavaScreen)
+            content = screen.query_one("#java-content")
+            self.assertIs(screen.query_one("#maven-section").parent, content)
+            children = list(content.children)
+            self.assertLess(children.index(screen.query_one("#runtimes")),
+                            children.index(screen.query_one("#maven-section")))
+            self.assertLess(children.index(screen.query_one("#build").parent),
+                            children.index(screen.query_one("#maven-section")))
 
     async def test_protection_confirmation_cancel_and_save(self):
         app = self.make_app()

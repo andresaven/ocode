@@ -1,5 +1,10 @@
 # Cambios
 
+## 0.6.0
+
+- El listado de instancias muestra su estado y puerto.
+- Los botones para volver se muestran arriba a la izquierda y destacan más.
+
 ## 0.5.1
 
 - Las instancias con puertos distintos pueden coexistir independientemente de

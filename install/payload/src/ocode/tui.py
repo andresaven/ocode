@@ -14,6 +14,7 @@ from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.command import CommandPalette
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.coordinate import Coordinate
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
@@ -46,6 +47,7 @@ from .docker import (
     image_exists,
     inspect_volumes,
     launch_detached,
+    maven_repository_path,
     prepare_web_login,
     recreate_container,
     remove_container,
@@ -237,6 +239,7 @@ class AddProjectScreen(Screen):
     #buttons { height: 3; }
     #workspace-actions { height: 3; }
     #browse { width: auto; }
+    #add-content { height: 1fr; }
     .hint { color: $text-muted; margin-bottom: 1; }
     """
 
@@ -251,41 +254,45 @@ class AddProjectScreen(Screen):
         yield Header()
         yield Label("Añadir working copy", classes="title")
 
-        yield Label("Ruta de la working copy")
-        yield Input(
-            value="",
-            placeholder=cfg.repositories_root,
-            id="workspace",
-            classes="field",
-        )
-        with Horizontal(id="workspace-actions"):
-            yield Button("Navegar...", id="browse", variant="primary")
+        with VerticalScroll(id="add-content"):
+            yield Label("Ruta de la working copy")
+            yield Input(
+                value="",
+                placeholder=cfg.repositories_root,
+                id="workspace",
+                classes="field",
+            )
+            with Horizontal(id="workspace-actions"):
+                yield Button("Navegar...", id="browse", variant="primary")
 
-        yield Label("Nombre del proyecto")
-        yield Input(placeholder="UGV", id="name", classes="field")
+            yield Label("Nombre del proyecto")
+            yield Input(placeholder="UGV", id="name", classes="field")
 
-        yield Label("Rama / working copy")
-        yield Input(value="trunk", id="branch", classes="field")
+            yield Label("Rama / working copy")
+            yield Input(value="trunk", id="branch", classes="field")
 
-        yield Label("Java")
-        yield Static("Maven y npm ya vienen instalados en el runtime.", classes="hint")
-        yield Select(java_options, value="java8", id="runtime", classes="field")
+            yield Label("Java")
+            yield Static("Maven y npm ya vienen instalados en el runtime.", classes="hint")
+            yield Select(java_options, value="java8", id="runtime", classes="field")
 
-        yield Label("Modo por defecto")
-        yield Select(
-            [("TUI", "tui"), ("Web / serve", "serve")],
-            value=cfg.default_mode,
-            id="mode",
-            classes="field",
-        )
+            yield Label("Repositorio Maven local (opcional)")
+            yield Input(value=cfg.default_maven_repository, id="maven-repository", classes="field")
 
-        yield Label("Puerto web")
-        yield Input(
-            value=str(cfg.default_port),
-            type="integer",
-            id="port",
-            classes="field",
-        )
+            yield Label("Modo por defecto")
+            yield Select(
+                [("TUI", "tui"), ("Web / serve", "serve")],
+                value=cfg.default_mode,
+                id="mode",
+                classes="field",
+            )
+
+            yield Label("Puerto web")
+            yield Input(
+                value=str(cfg.default_port),
+                type="integer",
+                id="port",
+                classes="field",
+            )
 
         with Horizontal(id="buttons"):
             yield Button("Guardar", id="save", variant="success")
@@ -334,6 +341,7 @@ class AddProjectScreen(Screen):
         runtime = str(self.query_one("#runtime", Select).value)
         mode = str(self.query_one("#mode", Select).value)
         port_text = self.query_one("#port", Input).value.strip()
+        maven_repository = self.query_one("#maven-repository", Input).value.strip()
 
         if not workspace or not Path(workspace).is_dir():
             self.app.push_screen(
@@ -352,6 +360,12 @@ class AddProjectScreen(Screen):
             self.app.push_screen(MessageScreen("Error", "Puerto no válido."))
             return
 
+        try:
+            maven_repository_path(maven_repository)
+        except DockerError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
+
         project = self.app.store.create_project(
             name=name,
             branch=branch,
@@ -359,6 +373,7 @@ class AddProjectScreen(Screen):
             runtime=runtime,
             default_mode=mode,
             port=port,
+            maven_repository=maven_repository,
         )
         self.app.pop_screen()
         self.app.open_project(project.project_id)
@@ -427,6 +442,7 @@ class SensitivePathsScreen(SaveRecreateScreen):
     #protection-report { height: auto; border: round $primary; padding: 1 2; }
     #addrow { height: 3; }
     #protection-navigation { height: 3; }
+    #back { width: auto; margin-bottom: 1; }
     #save { width: auto; }
     .hint { color: $text-muted; margin-bottom: 1; }
     """
@@ -441,6 +457,7 @@ class SensitivePathsScreen(SaveRecreateScreen):
         self.draft = replace(project, sensitive_paths=list(project.sensitive_paths))
 
         yield Header()
+        yield Button("← Volver", id="back", variant="primary")
         yield Label(
             f"Protección de archivos · {project.name} / {project.branch}",
             classes="title",
@@ -449,7 +466,6 @@ class SensitivePathsScreen(SaveRecreateScreen):
             yield from self._protection_content(project)
 
         with Horizontal(id="protection-navigation"):
-            yield Button("Volver", id="back")
             yield Button("Guardar y recrear contenedor", id="save", variant="warning")
 
         yield Footer()
@@ -594,6 +610,7 @@ class ProjectSettingsScreen(SaveRecreateScreen):
     #settings-content { height: 1fr; }
     #settings-content Horizontal { height: 3; }
     #settings-navigation { height: 3; }
+    #back { width: auto; margin-bottom: 1; }
     #save { width: auto; }
     .field { margin-bottom: 1; }
     .hint { color: $text-muted; margin-bottom: 1; }
@@ -612,12 +629,12 @@ class ProjectSettingsScreen(SaveRecreateScreen):
         ]
 
         yield Header()
+        yield Button("← Volver", id="back", variant="primary")
         yield Label(f"Configurar · {p.name} / {p.branch}", classes="title")
 
         with VerticalScroll(id="settings-content"):
             yield from self._settings_content(p, runtimes)
         with Horizontal(id="settings-navigation"):
-            yield Button("Volver", id="back")
             yield Button("Guardar y recrear contenedor", id="save", variant="warning")
         yield Footer()
 
@@ -628,6 +645,14 @@ class ProjectSettingsScreen(SaveRecreateScreen):
         yield Label("Java")
         yield Static("Maven y npm ya vienen instalados en el runtime.", classes="hint")
         yield Select(runtimes, value=p.runtime, id="runtime", classes="field")
+
+        yield Label("Repositorio Maven local (opcional)")
+        yield Static(
+            "Solo repository, en lectura; OpenCode podrá ver sus artefactos y metadatos. "
+            "Usa mvn -o para compilar sin acceder a repositorios remotos.",
+            classes="hint",
+        )
+        yield Input(value=p.maven_repository, id="maven-repository", classes="field")
 
         yield Label("Modo predeterminado")
         yield Select(
@@ -663,6 +688,12 @@ class ProjectSettingsScreen(SaveRecreateScreen):
 
         p.workspace = str(Path(workspace).resolve())
         p.runtime = str(self.query_one("#runtime", Select).value)
+        p.maven_repository = self.query_one("#maven-repository", Input).value.strip()
+        try:
+            maven_repository_path(p.maven_repository)
+        except DockerError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
         p.default_mode = str(self.query_one("#mode", Select).value)
         try:
             p.port = int(self.query_one("#port", Input).value)
@@ -698,6 +729,7 @@ class ProjectStorageScreen(Screen):
     #storage-scroll { height: 1fr; }
     #storage-report { height: auto; }
     #storage-navigation { height: 3; }
+    #storage-back { width: auto; margin-bottom: 1; }
     """
 
     def __init__(self, project_id: str):
@@ -706,12 +738,12 @@ class ProjectStorageScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Button("← Volver", id="storage-back", variant="primary")
         yield Label("Almacenamiento · contenedor y host", classes="title")
         with VerticalScroll(id="storage-scroll"):
             yield Static("Consultando montajes…", id="storage-report", markup=False)
         with Horizontal(id="storage-navigation"):
             yield Button("Actualizar", id="storage-refresh")
-            yield Button("Volver", id="storage-back")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -742,33 +774,73 @@ class ProjectStorageScreen(Screen):
 class JavaScreen(Screen):
     CSS = """
     JavaScreen { padding: 1 3; }
-    #runtimes { height: 1fr; }
+    #java-content { height: 1fr; }
+    #runtimes { height: 8; }
     .hint { color: $text-muted; margin-bottom: 1; }
+    #back { width: auto; margin-bottom: 1; }
+    #maven-section {
+        height: auto;
+        border: round $primary;
+        padding: 1 2;
+        margin-top: 2;
+    }
+    #save-maven { margin-top: 1; }
     """
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Label("Java", classes="title")
-        yield Static("Maven y npm ya vienen instalados en todos los runtimes.", classes="hint")
+        yield Button("← Volver", id="back", variant="primary")
+        yield Label("Java y Maven", classes="title")
+        with VerticalScroll(id="java-content"):
+            yield Static("Maven y npm ya vienen instalados en todos los runtimes.", classes="hint")
 
-        table = DataTable(id="runtimes")
-        table.add_columns("Java", "Imagen", "Estado")
-        for name, profile in self.app.global_cfg.runtimes.items():
-            if not profile.java:
-                continue
-            table.add_row(
-                f"Java {profile.java}",
-                profile.image,
-                "sin comprobar",
-                key=name,
-            )
-        table.cursor_type = "row"
-        yield table
+            table = DataTable(id="runtimes")
+            table.add_columns("Java", "Imagen", "Estado")
+            for name, profile in self.app.global_cfg.runtimes.items():
+                if not profile.java:
+                    continue
+                table.add_row(
+                    f"Java {profile.java}",
+                    profile.image,
+                    "sin comprobar",
+                    key=name,
+                )
+            table.cursor_type = "row"
+            yield table
 
-        with Horizontal():
-            yield Button("Construir seleccionado", id="build", variant="success")
-            yield Button("Volver", id="back")
+            with Horizontal():
+                yield Button("Construir seleccionado", id="build", variant="success")
+
+            with Vertical(id="maven-section"):
+                yield Label("Maven · repositorio local por defecto", classes="title")
+                yield Static(
+                    "Solo repository, en lectura. Puedes cambiarlo al añadir una instancia "
+                    "o en sus Ajustes. No modifica instancias existentes.",
+                    classes="hint",
+                )
+                yield Input(
+                    value=self.app.global_cfg.default_maven_repository,
+                    id="default-maven-repository",
+                )
+                yield Button("Guardar ruta por defecto", id="save-maven", variant="success")
         yield Footer()
+
+    @on(Button.Pressed, "#save-maven")
+    def save_maven(self) -> None:
+        value = self.query_one("#default-maven-repository", Input).value.strip()
+        try:
+            maven_repository_path(value)
+        except DockerError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
+        cfg = replace(self.app.global_cfg, default_maven_repository=value)
+        try:
+            self.app.store.save_global(cfg)
+        except OSError as exc:
+            self.app.push_screen(MessageScreen("Error", f"No se pudo guardar la ruta: {exc}"))
+            return
+        self.app.global_cfg = cfg
+        self.app.push_screen(MessageScreen("Maven", "Ruta por defecto guardada para nuevas instancias."))
 
     @on(Button.Pressed, "#build")
     async def build(self) -> None:
@@ -826,6 +898,7 @@ class ProjectScreen(Screen):
     #danger-zone { border: round $error; }
     #instance-status { height: auto; margin-bottom: 1; }
     #navigation { height: auto; }
+    #back { width: auto; margin-bottom: 1; }
     """
 
     def __init__(self, project_id: str):
@@ -838,6 +911,7 @@ class ProjectScreen(Screen):
     def compose(self) -> ComposeResult:
         p = self.project()
         yield Header()
+        yield Button("← Volver", id="back", variant="primary")
         yield Label(f"Gestionar instancia · {p.name} / {p.branch}", classes="title")
         with VerticalScroll(id="instance-content"):
             yield Static(self._summary(), id="info", markup=False)
@@ -881,8 +955,6 @@ class ProjectScreen(Screen):
                 )
                 with Horizontal():
                     yield Button("Eliminar instancia", id="delete-instance", variant="error")
-        with Horizontal(id="navigation"):
-            yield Button("Volver", id="back")
         yield Footer()
 
     def _summary(self) -> str:
@@ -1457,7 +1529,7 @@ class MainScreen(Screen):
         yield Label("ocode · instancias OpenCode", classes="title")
 
         table = DataTable(id="projects")
-        table.add_columns("Proyecto", "Rama", "Java", "Working copy")
+        table.add_columns("Proyecto", "Rama", "Java", "Estado", "Puerto", "Working copy")
         for p in self.app.store.list_projects():
             profile = self.app.global_cfg.runtimes.get(p.runtime)
             java = profile.java if profile else p.runtime
@@ -1465,6 +1537,8 @@ class MainScreen(Screen):
                 p.name,
                 p.branch,
                 java,
+                "Consultando…",
+                str(p.port),
                 p.workspace,
                 key=p.project_id,
             )
@@ -1474,11 +1548,43 @@ class MainScreen(Screen):
         with Grid(id="toolbar"):
             yield Button("Añadir", id="add", variant="success")
             yield Button("Gestionar instancia", id="open", variant="primary")
-            yield Button("Java", id="java")
+            yield Button("Java / Maven", id="java")
             yield Button("Motor", id="container-runtime")
             yield Button("Diagnóstico", id="doctor")
             yield Button("Config global", id="global-config")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self.refresh_instance_statuses()
+
+    def on_screen_resume(self) -> None:
+        self.refresh_instance_statuses()
+
+    @work(exclusive=True, group="instance-statuses")
+    async def refresh_instance_statuses(self) -> None:
+        table = self.query_one("#projects", DataTable)
+        projects = self.app.store.list_projects()
+        labels = {
+            "absent": "Sin iniciar",
+            "running": "En ejecución",
+            "exited": "Detenida",
+            "created": "Detenida",
+            "paused": "En pausa",
+            "restarting": "Reiniciándose",
+            "dead": "Error",
+            "removing": "Eliminándose",
+        }
+        for row, project in enumerate(projects):
+            try:
+                status = await asyncio.to_thread(
+                    container_status,
+                    self.app.global_cfg,
+                    project.container_name,
+                )
+                label = labels.get(status, status)
+            except Exception:
+                label = "No disponible"
+            table.update_cell_at(Coordinate(row, 3), label)
 
     def selected_project(self) -> str | None:
         table = self.query_one("#projects", DataTable)

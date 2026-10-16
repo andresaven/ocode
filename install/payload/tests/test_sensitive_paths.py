@@ -31,6 +31,32 @@ class SensitivePathsTests(unittest.TestCase):
     def test_new_project_has_separate_file(self):
         self.assertEqual(read_sensitive_paths(self.rules), BUILTIN_SENSITIVE_PATHS)
         self.assertNotIn("sensitive_paths", json.loads(self.config.read_text()))
+        self.assertEqual(self.store.get_project(self.project.project_id).maven_repository, "")
+
+    def test_maven_repository_setting_round_trips_without_changing_rules(self):
+        original = self.rules.read_bytes()
+        self.project.maven_repository = r"C:\Users\usuario\.m2\repository"
+        self.store.save_project(self.project)
+        self.assertEqual(self.store.get_project(self.project.project_id).maven_repository,
+                         self.project.maven_repository)
+        self.assertEqual(self.rules.read_bytes(), original)
+
+    def test_global_default_is_saved_but_does_not_change_existing_projects(self):
+        cfg = self.store.load_global()
+        self.assertEqual(cfg.default_maven_repository, "")
+        cfg.default_maven_repository = r"C:\Users\usuario\.m2\repository"
+        self.store.save_global(cfg)
+        self.assertEqual(self.store.load_global().default_maven_repository,
+                         cfg.default_maven_repository)
+        self.assertEqual(self.store.get_project(self.project.project_id).maven_repository, "")
+
+        new_project = self.store.create_project(
+            name="nuevo", branch="main", workspace=self.temp.name,
+            runtime="java8", default_mode="tui", port=4097,
+            maven_repository=cfg.default_maven_repository,
+        )
+        self.assertEqual(self.store.get_project(new_project.project_id).maven_repository,
+                         cfg.default_maven_repository)
 
     def test_creation_does_not_add_configuration_to_working_copy(self):
         workspace = Path(self.temp.name) / "working-copy"
