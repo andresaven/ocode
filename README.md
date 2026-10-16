@@ -220,6 +220,40 @@ solo lectura para el contenedor: si Maven necesita escribir metadatos, alguna
 compilación puede fallar. Las dependencias no descargadas previamente en el
 equipo tampoco estarán disponibles en modo offline.
 
+En entornos donde la working copy vive en una unidad de Windows montada por
+WSL, Maven puede fallar al copiar recursos por no poder aplicar permisos POSIX
+en el destino. Para esos casos, **Ajustes** admite una lista de **directorios
+de build en volumen Linux** (opcional): rutas relativas a la working copy,
+separadas por `;`, por ejemplo `wseganadero/target`. ocode monta un volumen
+nombrado en cada una, así que el compilador escribe en un sistema de archivos
+Linux. Cada instancia tiene sus propios volúmenes.
+
+Para configurarlo:
+
+1. Al añadir la working copy (**Añadir working copy**) o en **Ajustes** de la
+   instancia, rellena **Directorios de build en volumen Linux** con las rutas
+   relativas separadas por `;`, por ejemplo `wseganadero/target`.
+2. Pulsa **Guardar y recrear contenedor**: el montaje solo se aplica al recrear.
+3. Compila dentro del contenedor, por ejemplo `mvn -o -DskipTests package`.
+4. Revisa **Almacenamiento** para confirmar que el volumen del directorio está
+   montado en lectura y escritura.
+
+Consecuencias a tener en cuenta:
+
+- El `target` (o el directorio elegido) de Windows **no se actualiza** desde el
+  contenedor: quedan dos artefactos independientes, el del IDE y el de ocode.
+- El volumen es persistente: se conserva al recrear la instancia y se elimina al
+  eliminar la instancia. Aparece en la vista de **Almacenamiento**.
+- El directorio es **escribible dentro del contenedor** y persiste; no puede
+  solaparse con las reglas de protección, pero no sustituye a esas reglas.
+- Guardar este ajuste requiere **Guardar y recrear contenedor**; detener y
+  arrancar no cambia los montajes.
+- Solo cubre las salidas escritas bajo los directorios indicados. Otras salidas
+  que el proyecto escriba fuera de ellos siguen dependiendo del montaje.
+- El directorio debe ser de **salida** (como `target`). Un volumen sobre una
+  carpeta de código o de recursos la ocultaría dentro del contenedor, aunque no
+  la borra del equipo.
+
 ## Configuración e instrucciones
 
 La configuración activa vive fuera de la working copy:

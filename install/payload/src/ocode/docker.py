@@ -8,7 +8,7 @@ import time
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
-from .model import GlobalConfig, MAVEN_VERSION, ProjectConfig
+from .model import GlobalConfig, MAVEN_VERSION, ProjectConfig, normalize_build_path
 from .paths import Paths
 
 
@@ -234,6 +234,59 @@ def _mount_volume(args, volume, target):
     args.extend(
         ["--mount", f"type=volume,source={volume},target={target}"]
     )
+
+
+def validate_build_paths(
+    workspace: Path,
+    paths: list[str],
+    sensitive_paths: list[str] | None = None,
+) -> None:
+    """Reject build directories outside the working copy or overlapping protection.
+
+    Redirecting a directory to a Linux volume is what lets Maven set POSIX
+    permissions on the build output of a Windows working copy. These checks keep
+    the mount inside the working copy and away from the protection masks.
+    """
+    root = workspace.resolve()
+
+    for raw in paths:
+        try:
+            relative = normalize_build_path(raw)
+        except ValueError as exc:
+            raise DockerError(f"Directorio de build no válido: {exc}") from exc
+
+        if not relative:
+            raise DockerError(
+                "Indica un directorio de build relativo a la working copy."
+            )
+
+        host = root / Path(relative)
+        if host.exists() and not host.is_dir():
+            raise DockerError(
+                f"El directorio de build no es una carpeta: {relative}"
+            )
+        if host.exists() and (host / "pom.xml").is_file():
+            raise DockerError(
+                f"{relative} es la raíz de un módulo Maven, no una carpeta de "
+                "salida. Indica su target u otra carpeta de build."
+            )
+        if not host.exists() and not host.parent.is_dir():
+            raise DockerError(
+                "No existe el directorio padre del build dentro de la working "
+                f"copy: {relative}"
+            )
+
+        for sensitive in sensitive_paths or []:
+            protected = str(sensitive).replace("\\", "/").strip("/")
+            if (
+                relative == protected
+                or relative.startswith(f"{protected}/")
+                or protected.startswith(f"{relative}/")
+            ):
+                raise DockerError(
+                    f"El directorio de build {relative} se solapa con la "
+                    f"protección {protected}. Elige un directorio fuera de ella."
+                )
 
 
 def maven_repository_path(value: str) -> Path | None:
@@ -476,6 +529,18 @@ def build_run_command(
             ])
         elif host_path.is_file():
             args.extend(["--volume", f"/dev/null:{target}:ro"])
+
+    # Build output can leave the Windows mount: the volume is a Linux
+    # filesystem, so plugins that copy POSIX permissions onto the output work.
+    build_volumes = project.build_volumes
+    if build_volumes:
+        validate_build_paths(
+            workspace,
+            [relative for relative, _ in build_volumes],
+            [relative for relative, _ in resolved_sensitive],
+        )
+        for relative, volume in build_volumes:
+            _mount_volume(args, volume, f"/workspace/{relative}")
 
     web_token = None
     server_password = None
@@ -959,7 +1024,12 @@ def container_logs(cfg: GlobalConfig, name, tail=200):
 def inspect_volumes(cfg: GlobalConfig, project: ProjectConfig) -> str:
     engine = resolve_engine(cfg)
     rows = []
-    for volume in (project.data_volume, project.state_volume):
+    volumes = [
+        project.data_volume,
+        project.state_volume,
+        *[name for _, name in project.build_volumes],
+    ]
+    for volume in volumes:
         cp = subprocess.run(
             engine.command + ["volume", "inspect", volume, "--format", "{{.Name}}"],
             text=True,
@@ -978,7 +1048,11 @@ def remove_state(cfg: GlobalConfig, project: ProjectConfig) -> str:
     engine = resolve_engine(cfg)
     outputs = []
 
-    for volume in (project.data_volume, project.state_volume):
+    for volume in (
+        project.data_volume,
+        project.state_volume,
+        *[name for _, name in project.build_volumes],
+    ):
         cp = subprocess.run(
             engine.command + ["volume", "rm", volume],
             text=True,

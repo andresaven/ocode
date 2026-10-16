@@ -48,6 +48,41 @@ def read_sensitive_paths(path: Path) -> list[str]:
     return rules
 
 
+BUILD_PATH_SEPARATOR = ";"
+
+
+def normalize_build_path(value: str) -> str:
+    """Relative directory of the working copy whose build output moves to Linux."""
+    value = value.strip().replace("\\", "/")
+    if value.startswith("/") or re.match(r"^[A-Za-z]:", value):
+        raise ValueError(
+            "Indica una ruta relativa a la working copy, no una absoluta."
+        )
+    parts = [part for part in value.strip("/").split("/") if part not in ("", ".")]
+    if not parts:
+        return ""
+    if any(part == ".." or ":" in part for part in parts):
+        raise ValueError("No se permiten rutas absolutas ni segmentos '..'.")
+    normalized = "/".join(parts)
+    if "," in normalized or "\n" in normalized:
+        raise ValueError("La ruta no puede contener comas ni saltos de línea.")
+    return normalized
+
+
+def parse_build_paths(value: str) -> list[str]:
+    """Read the TUI field: relative directories separated by ';' or newlines."""
+    paths: list[str] = []
+    for raw in value.replace("\n", BUILD_PATH_SEPARATOR).split(BUILD_PATH_SEPARATOR):
+        normalized = normalize_build_path(raw)
+        if normalized and normalized not in paths:
+            paths.append(normalized)
+    return paths
+
+
+def format_build_paths(paths: list[str]) -> str:
+    return f"{BUILD_PATH_SEPARATOR} ".join(paths)
+
+
 @dataclass
 class RuntimeProfile:
     name: str
@@ -149,6 +184,7 @@ class ProjectConfig:
     project_agents_enabled: bool = True
     project_config_enabled: bool = False
     maven_repository: str = ""
+    build_paths: list[str] = field(default_factory=list)
 
     def to_dict(self):
         return asdict(self)
@@ -207,3 +243,30 @@ class ProjectConfig:
     @property
     def state_volume(self):
         return f"ocode-{self.instance_key}-state"
+
+    @property
+    def build_volumes(self) -> list[tuple[str, str]]:
+        """(relative directory, volume name) of each redirected build output.
+
+        Each directory gets its own volume: Maven modules must not share build
+        output. Names derive from the path so they stay stable when the list
+        changes, and collisions get a numeric suffix.
+        """
+        result: list[tuple[str, str]] = []
+        names: set[str] = set()
+
+        for path in self.build_paths:
+            slug = re.sub(r"[^a-z0-9_.-]+", "-", path.lower()).strip("-.")[:40]
+            slug = slug.strip("-.") or "build"
+
+            candidate = slug
+            index = 1
+            while f"ocode-{self.instance_key}-build-{candidate}" in names:
+                index += 1
+                candidate = f"{slug}-{index}"
+
+            name = f"ocode-{self.instance_key}-build-{candidate}"
+            names.add(name)
+            result.append((path, name))
+
+        return result

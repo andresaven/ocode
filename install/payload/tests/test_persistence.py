@@ -215,6 +215,101 @@ class PersistenceTests(unittest.TestCase):
                     with self.assertRaises(docker.DockerError):
                         docker.maven_repository_path(value)
 
+    def test_build_paths_get_their_own_writable_volume(self):
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            workspace = root / "working-copy"
+            (workspace / "wseganadero" / "target").mkdir(parents=True)
+            paths = Paths(root / "ocode")
+            paths.web_proxy_script.parent.mkdir(parents=True)
+            paths.web_proxy_script.touch()
+            paths.instructions_script.touch()
+            self.project.workspace = str(workspace)
+            self.project.sensitive_paths = []
+            self.project.build_paths = ["wseganadero/target"]
+
+            relative, volume = self.project.build_volumes[0]
+            self.assertEqual(relative, "wseganadero/target")
+            target = f"/workspace/{relative}"
+            self.assertEqual(target, "/workspace/wseganadero/target")
+
+            preview = docker.build_run_command(
+                paths=paths, global_cfg=self.cfg, project=self.project,
+                mode="tui", detached=False,
+            )
+            mounts = [preview.args[i + 1] for i, arg in enumerate(preview.args)
+                      if arg == "--mount"]
+            spec = f"type=volume,source={volume},target={target}"
+            self.assertIn(spec, mounts)
+            self.assertNotIn(f"{spec},readonly", mounts)
+
+            # Without the setting, the Windows working copy is untouched again.
+            self.project.build_paths = []
+            preview = docker.build_run_command(
+                paths=paths, global_cfg=self.cfg, project=self.project,
+                mode="serve", detached=True,
+            )
+            self.assertNotIn(target, " ".join(preview.args))
+
+    def test_build_volumes_use_stable_unique_names(self):
+        project = ProjectConfig("abc12345-id", "demo", "branch", ".")
+        self.assertEqual(project.build_volumes, [])
+
+        project.build_paths = [
+            "wseganadero/target",
+            "otro modulo/target",
+            "wseganadero/target",
+        ]
+        names = [name for _, name in project.build_volumes]
+        self.assertEqual(len(names), 3)
+        self.assertEqual(len(set(names)), 3)
+        self.assertIn(f"ocode-{project.instance_key}-build-wseganadero-target", names)
+        self.assertTrue(all(
+            name.startswith(f"ocode-{project.instance_key}-build-") for name in names
+        ))
+
+    def test_build_paths_reject_unsafe_and_protected_paths(self):
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            workspace = Path(directory)
+            (workspace / "modulo" / "target").mkdir(parents=True)
+            (workspace / "modulo" / "pom.xml").write_text("<project/>", encoding="utf-8")
+            (workspace / "otro" / "target").mkdir(parents=True)
+            (workspace / "salida").write_text("no es carpeta", encoding="utf-8")
+
+            for value in ("/absoluto/target", "../fuera/target", "C:/repo/target", ""):
+                with self.subTest(value=value):
+                    with self.assertRaises(docker.DockerError):
+                        docker.validate_build_paths(workspace, [value])
+
+            for value in ("salida", "modulo", "noexiste/target"):
+                with self.subTest(value=value):
+                    with self.assertRaises(docker.DockerError):
+                        docker.validate_build_paths(workspace, [value])
+
+            # A build directory cannot overlap a protection mask in either direction.
+            docker.validate_build_paths(workspace, ["otro/target"])
+            for value, protected in (
+                ("otro/target", "otro/target"),
+                ("otro/target/classes", "otro/target"),
+                ("otro", "otro/target"),
+            ):
+                with self.subTest(value=value, protected=protected):
+                    with self.assertRaises(docker.DockerError):
+                        docker.validate_build_paths(workspace, [value], [protected])
+
+    def test_remove_state_includes_build_volumes(self):
+        self.project.build_paths = ["modulo/target", "modulo2/target"]
+        build_volumes = [name for _, name in self.project.build_volumes]
+        with patch.object(docker, "container_running", return_value=False), \
+             patch.object(docker.subprocess, "run",
+                          return_value=subprocess.CompletedProcess([], 0, "removed")) as run:
+            docker.remove_state(self.cfg, self.project)
+            self.assertEqual([item.args[0] for item in run.call_args_list], [
+                ["docker", "volume", "rm", self.project.data_volume],
+                ["docker", "volume", "rm", self.project.state_volume],
+                *[["docker", "volume", "rm", name] for name in build_volumes],
+            ])
+
     def test_foreground_starts_server_before_client(self):
         preview = docker.CommandPreview(
             ["docker", "start", "demo"],

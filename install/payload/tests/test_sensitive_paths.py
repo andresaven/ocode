@@ -32,6 +32,24 @@ class SensitivePathsTests(unittest.TestCase):
         self.assertEqual(read_sensitive_paths(self.rules), BUILTIN_SENSITIVE_PATHS)
         self.assertNotIn("sensitive_paths", json.loads(self.config.read_text()))
         self.assertEqual(self.store.get_project(self.project.project_id).maven_repository, "")
+        self.assertEqual(self.store.get_project(self.project.project_id).build_paths, [])
+
+    def test_build_paths_setting_round_trips_without_changing_rules(self):
+        original = self.rules.read_bytes()
+        self.project.build_paths = ["wseganadero/target"]
+        self.store.save_project(self.project)
+        self.assertEqual(self.store.get_project(self.project.project_id).build_paths,
+                         ["wseganadero/target"])
+        self.assertEqual(self.rules.read_bytes(), original)
+
+    def test_creation_stores_build_paths(self):
+        new_project = self.store.create_project(
+            name="conbuild", branch="main", workspace=self.temp.name,
+            runtime="java8", default_mode="tui", port=4100,
+            build_paths=["wseganadero/target"],
+        )
+        self.assertEqual(self.store.get_project(new_project.project_id).build_paths,
+                         ["wseganadero/target"])
 
     def test_maven_repository_setting_round_trips_without_changing_rules(self):
         original = self.rules.read_bytes()
