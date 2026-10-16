@@ -65,9 +65,15 @@ def storage_report(paths: Paths, cfg: GlobalConfig, project: ProjectConfig) -> s
             lines.append(f"Contenedor: {destination}")
             lines.append(f"  Tipo: {kind} · {permissions}")
             if kind == "volume":
-                lines.append(f"  Volumen Docker: {mount.get('Name', '(sin nombre)')}")
+                volume_name = mount.get("Name", "")
+                lines.append(f"  Volumen Docker: {volume_name or '(sin nombre)'}")
                 lines.append(f"  Ruta en el host del motor: {source or '(no informada)'}")
                 lines.append("  En Docker Desktop/WSL esta ruta vive en Linux, no en una carpeta de Windows.")
+                if volume_name.startswith(f"ocode-{project.instance_key}-build-"):
+                    lines.append(
+                        "  Directorio de build redirigido: el compilador escribe aquí, "
+                        "no en la carpeta de Windows correspondiente."
+                    )
             elif kind == "bind":
                 lines.append(f"  Origen host: {host_mount_path(source) or '(no informado)'}")
                 if host_mount_path(source) != source:
@@ -101,6 +107,6 @@ def storage_report(paths: Paths, cfg: GlobalConfig, project: ProjectConfig) -> s
         "ALMACENAMIENTO INTERNO",
         "Los ficheros ajenos a los montajes pertenecen a la imagen/capa del contenedor.",
         "No tienen una correspondencia individual editable con ficheros del host.",
-        "Los volúmenes de datos y estado son persistentes; esta vista no los modifica.",
+        "Los volúmenes de datos, estado y compilación son persistentes; esta vista no los modifica.",
     ])
     return "\n".join(lines)

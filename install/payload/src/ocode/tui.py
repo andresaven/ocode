@@ -55,10 +55,11 @@ from .docker import (
     sensitive_applied_paths,
     sensitive_mount_report,
     stop_container,
+    validate_build_paths,
 )
 from .doctor import doctor
 from .storage import storage_report
-from .model import ProjectConfig
+from .model import ProjectConfig, format_build_paths, parse_build_paths
 from .paths import Paths
 from .store import Store
 
@@ -278,6 +279,15 @@ class AddProjectScreen(Screen):
             yield Label("Repositorio Maven local (opcional)")
             yield Input(value=cfg.default_maven_repository, id="maven-repository", classes="field")
 
+            yield Label("Directorios de build en volumen Linux (opcional)")
+            yield Static(
+                "Rutas relativas a la working copy separadas por ';' "
+                "(ej.: wseganadero/target). El compilador escribe ahí y no en la "
+                "carpeta de Windows. Cada una requiere guardar y recrear la instancia.",
+                classes="hint",
+            )
+            yield Input(value="", id="build-paths", classes="field")
+
             yield Label("Modo por defecto")
             yield Select(
                 [("TUI", "tui"), ("Web / serve", "serve")],
@@ -366,6 +376,15 @@ class AddProjectScreen(Screen):
             self.app.push_screen(MessageScreen("Error", str(exc)))
             return
 
+        try:
+            build_paths = parse_build_paths(
+                self.query_one("#build-paths", Input).value
+            )
+            validate_build_paths(Path(workspace).resolve(), build_paths)
+        except (ValueError, DockerError) as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
+
         project = self.app.store.create_project(
             name=name,
             branch=branch,
@@ -374,6 +393,7 @@ class AddProjectScreen(Screen):
             default_mode=mode,
             port=port,
             maven_repository=maven_repository,
+            build_paths=build_paths,
         )
         self.app.pop_screen()
         self.app.open_project(project.project_id)
@@ -394,7 +414,7 @@ class SaveRecreateScreen(Screen):
                 "opencode.jsonc, imagen, puertos y montajes. El contenedor nuevo "
                 "tendrá servidor compartido Web/TUI.\n\n"
                 "Se conservarán la working copy, los ajustes y los volúmenes "
-                "de sesiones, datos y estado.\n\n"
+                "de sesiones, datos, estado y compilación.\n\n"
                 "Se interrumpirán las tareas activas. Se perderán los ficheros "
                 "guardados únicamente dentro del contenedor, fuera de montajes "
                 "y volúmenes persistentes.\n\n"
@@ -654,6 +674,20 @@ class ProjectSettingsScreen(SaveRecreateScreen):
         )
         yield Input(value=p.maven_repository, id="maven-repository", classes="field")
 
+        yield Label("Directorios de build en volumen Linux (opcional)")
+        yield Static(
+            "Rutas relativas a la working copy separadas por ';' "
+            "(ej.: wseganadero/target). El compilador escribe ahí y evita los "
+            "permisos del montaje de Windows; el target de Windows no se actualiza. "
+            "No puede solaparse con las reglas de protección.",
+            classes="hint",
+        )
+        yield Input(
+            value=format_build_paths(p.build_paths),
+            id="build-paths",
+            classes="field",
+        )
+
         yield Label("Modo predeterminado")
         yield Select(
             [("TUI", "tui"), ("Web / serve", "serve")],
@@ -692,6 +726,18 @@ class ProjectSettingsScreen(SaveRecreateScreen):
         try:
             maven_repository_path(p.maven_repository)
         except DockerError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
+        try:
+            p.build_paths = parse_build_paths(
+                self.query_one("#build-paths", Input).value
+            )
+            validate_build_paths(
+                Path(p.workspace),
+                p.build_paths,
+                sensitive_applied_paths(p),
+            )
+        except (ValueError, DockerError) as exc:
             self.app.push_screen(MessageScreen("Error", str(exc)))
             return
         p.default_mode = str(self.query_one("#mode", Select).value)
