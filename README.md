@@ -386,24 +386,30 @@ Estos atajos pertenecen a la TUI de **ocode**, no a la TUI de OpenCode:
 | Atajo | Acción |
 | --- | --- |
 | `Ctrl+P` | Abrir la paleta de atajos. |
-| `Alt+←` | Volver a la pantalla anterior. |
-| `Alt+→` | Recuperar la pantalla siguiente. |
+| `Ctrl+←` | Volver a la pantalla anterior. |
+| `Ctrl+→` | Recuperar la pantalla siguiente. |
 | `q` | Salir de ocode sin detener las instancias. |
 
-La paleta permite abrir los archivos globales y del proyecto en la aplicación
-predeterminada de Windows, consultar el almacenamiento y actualizar ocode.
-Las acciones de proyecto utilizan la instancia abierta o seleccionada.
+El botón **Opciones**, arriba a la derecha, muestra las acciones del contexto:
+en la pantalla principal, los archivos y Skills generales; en la gestión de
+una instancia, los archivos, Skills y reglas del proyecto, además del
+almacenamiento. Los archivos se abren con la aplicación predeterminada de
+Windows y las carpetas Skills en el Explorador.
 
 **Ver almacenamiento del proyecto** muestra los montajes reales del
 contenedor, sus permisos, los volúmenes persistentes y las rutas de
 configuración en el host. Distingue la configuración actual de lo que está
-montado realmente y permite actualizar la consulta.
+montado realmente y permite actualizar la consulta o abrir la working copy
+en el Explorador de Windows. **Explorar contenedor** permite recorrer nombres
+de directorios de una instancia en ejecución; es de solo lectura y no inicia
+instancias detenidas.
 
 Los volúmenes de datos y estado viven en el almacenamiento del motor;
 en Docker Desktop/WSL no son carpetas normales de Windows. Los archivos
 de la capa interna del contenedor no tienen una correspondencia individual
 editable en el host. Esta vista no lee el contenido de los archivos ni
-modifica los volúmenes.
+modifica los volúmenes. El explorador interno solo lista directorios; no abre
+ni lee archivos.
 
 ## CLI y diagnóstico
 
@@ -448,11 +454,10 @@ cd C:\entorno_desarrollo\ocode
 .\update.cmd
 ```
 
-También puedes elegir **Buscar actualizaciones** en la paleta de atajos para
+También puedes elegir **Buscar actualizaciones** en Opciones para
 comprobarlo en cualquier momento, **Actualizar ocode** para abrir `update.cmd`
-tras cerrar ocode, o **Desactivar comprobación automática** para que ocode no
-avise al iniciar. El ajuste equivalente en `config\config.json` es
-`check_updates`.
+tras cerrar ocode. La comprobación automática se controla mediante el ajuste
+`check_updates` en `config\config.json`.
 
 La actualización descarga el paquete, lo extrae en la carpeta de instalación y
 reutiliza `install\install.cmd` y `install\payload\`. Conserva la configuración

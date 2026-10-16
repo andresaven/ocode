@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
-from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 import os
 import shlex
@@ -58,7 +57,7 @@ from .docker import (
     validate_build_paths,
 )
 from .doctor import doctor
-from .storage import storage_report
+from .storage import container_directories, storage_report
 from .model import ProjectConfig, format_build_paths, parse_build_paths
 from .paths import Paths
 from .store import Store
@@ -124,6 +123,49 @@ class MessageScreen(ModalScreen[None]):
     @on(Button.Pressed, "#close")
     def close(self) -> None:
         self.dismiss(None)
+
+
+class OptionsScreen(ModalScreen[None]):
+    CSS = """
+    OptionsScreen { align: center middle; }
+    #options-box {
+        width: 72%;
+        max-width: 90%;
+        height: auto;
+        max-height: 85%;
+        border: round $accent;
+        padding: 1 2;
+        background: $surface;
+    }
+    #options-list { height: auto; max-height: 22; }
+    #options-list Button { width: 1fr; }
+    """
+
+    def __init__(self, project_id: str | None, options: list[tuple[str, str]]):
+        super().__init__()
+        self.project_id = project_id
+        self.options = options
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="options-box"):
+            yield Label("Opciones", classes="title")
+            with VerticalScroll(id="options-list"):
+                for index, (label, _) in enumerate(self.options):
+                    yield Button(label, id=f"option-{index}")
+            yield Button("Cerrar", id="options-close")
+
+    @on(Button.Pressed, "#options-close")
+    def close(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "Button")
+    def choose(self, event: Button.Pressed) -> None:
+        if not event.button.id or not event.button.id.startswith("option-"):
+            return
+        index = int(event.button.id.removeprefix("option-"))
+        _, action = self.options[index]
+        self.dismiss(None)
+        self.app.perform_option(action, self.project_id)
 
 
 class BusyScreen(ModalScreen[None]):
@@ -706,12 +748,12 @@ class ProjectSettingsScreen(SaveRecreateScreen):
         ]
 
         yield Header()
-        yield Button("← Volver", id="back", variant="primary")
         yield Label(f"Configurar · {p.name} / {p.branch}", classes="title")
 
         with VerticalScroll(id="settings-content"):
             yield from self._settings_content(p, runtimes)
         with Horizontal(id="settings-navigation"):
+            yield Button("← Volver", id="back", variant="primary")
             yield Button("Guardar y recrear contenedor", id="save", variant="warning")
         yield Footer()
 
@@ -833,6 +875,9 @@ class ProjectStorageScreen(Screen):
     #storage-report { height: auto; }
     #storage-navigation { height: 3; }
     #storage-back { width: auto; margin-bottom: 1; }
+    #storage-navigation Button { width: auto; }
+    #top-actions { height: 3; align: right middle; }
+    #top-actions Button { width: auto; }
     """
 
     def __init__(self, project_id: str):
@@ -841,12 +886,16 @@ class ProjectStorageScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        with Horizontal(id="top-actions"):
+            yield Button("Opciones", id="options", variant="primary")
         yield Button("← Volver", id="storage-back", variant="primary")
         yield Label("Almacenamiento · contenedor y host", classes="title")
         with VerticalScroll(id="storage-scroll"):
             yield Static("Consultando montajes…", id="storage-report", markup=False)
         with Horizontal(id="storage-navigation"):
             yield Button("Actualizar", id="storage-refresh")
+            yield Button("Abrir working copy", id="storage-open-workspace")
+            yield Button("Explorar contenedor", id="storage-explore")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -869,7 +918,94 @@ class ProjectStorageScreen(Screen):
     def reload_storage(self) -> None:
         self.refresh_storage()
 
+    @on(Button.Pressed, "#storage-open-workspace")
+    def open_workspace(self) -> None:
+        project = self.app.store.get_project(self.project_id)
+        self.app.open_host_path(Path(project.workspace))
+
+    @on(Button.Pressed, "#storage-explore")
+    def explore_container(self) -> None:
+        self.app.push_screen(ContainerDirectoryScreen(self.project_id))
+
+    @on(Button.Pressed, "#options")
+    def options(self) -> None:
+        self.app.open_options(self)
+
     @on(Button.Pressed, "#storage-back")
+    def back(self) -> None:
+        self.app.action_navigation_back()
+
+
+class ContainerDirectoryScreen(Screen):
+    CSS = """
+    ContainerDirectoryScreen { padding: 1 3; }
+    #container-path { width: 1fr; }
+    #container-list { height: 1fr; }
+    #container-back { width: auto; }
+    """
+
+    def __init__(self, project_id: str):
+        super().__init__()
+        self.project_id = project_id
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Label("Explorar directorios del contenedor · solo lectura", classes="title")
+        yield Static(
+            "Solo se listan directorios. La instancia debe estar en ejecución; "
+            "ocode no la iniciará ni leerá contenidos de archivos.",
+            markup=False,
+        )
+        with Horizontal():
+            yield Input(value="/", id="container-path")
+            yield Button("Abrir directorio", id="container-open", variant="primary")
+        table = DataTable(id="container-list")
+        table.add_column("Directorios", key="directory")
+        table.cursor_type = "row"
+        yield table
+        yield Button("← Volver", id="container-back")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.list_directory()
+
+    @work(exclusive=True, group="container-directories")
+    async def list_directory(self) -> None:
+        path = self.query_one("#container-path", Input).value.strip()
+        table = self.query_one("#container-list", DataTable)
+        table.clear()
+        table.add_row("Consultando…", key="loading")
+        try:
+            project = self.app.store.get_project(self.project_id)
+            directories = await asyncio.to_thread(
+                container_directories, self.app.global_cfg, project, path,
+            )
+            table.clear()
+            if path != "/":
+                table.add_row("..", key="..")
+            for directory in directories:
+                table.add_row(PurePosixPath(directory).name, key=directory)
+            if not directories:
+                table.add_row("(sin subdirectorios)", key="empty")
+        except Exception as exc:
+            table.clear()
+            table.add_row(f"No se pudo explorar: {exc}", key="error")
+
+    @on(Button.Pressed, "#container-open")
+    def open_directory(self) -> None:
+        self.list_directory()
+
+    @on(DataTable.RowSelected, "#container-list")
+    def select_directory(self, event: DataTable.RowSelected) -> None:
+        key = str(event.row_key.value)
+        if key in {"loading", "empty", "error"}:
+            return
+        current = self.query_one("#container-path", Input).value.rstrip("/") or "/"
+        parent = str(PurePosixPath(current).parent) if key == ".." else key
+        self.query_one("#container-path", Input).value = parent
+        self.list_directory()
+
+    @on(Button.Pressed, "#container-back")
     def back(self) -> None:
         self.app.action_navigation_back()
 
@@ -1002,6 +1138,8 @@ class ProjectScreen(Screen):
     #instance-status { height: auto; margin-bottom: 1; }
     #navigation { height: auto; }
     #back { width: auto; margin-bottom: 1; }
+    #top-actions { height: 3; align: right middle; }
+    #top-actions Button { width: auto; }
     """
 
     def __init__(self, project_id: str):
@@ -1014,6 +1152,8 @@ class ProjectScreen(Screen):
     def compose(self) -> ComposeResult:
         p = self.project()
         yield Header()
+        with Horizontal(id="top-actions"):
+            yield Button("Opciones", id="options", variant="primary")
         yield Button("← Volver", id="back", variant="primary")
         yield Label(f"Gestionar instancia · {p.name} / {p.branch}", classes="title")
         with VerticalScroll(id="instance-content"):
@@ -1059,6 +1199,10 @@ class ProjectScreen(Screen):
                 with Horizontal():
                     yield Button("Eliminar instancia", id="delete-instance", variant="error")
         yield Footer()
+
+    @on(Button.Pressed, "#options")
+    def options(self) -> None:
+        self.app.open_options(self)
 
     def _summary(self) -> str:
         p = self.project()
@@ -1625,10 +1769,14 @@ class MainScreen(Screen):
         grid-rows: 3 3;
     }
     #toolbar Button { width: 1fr; }
+    #top-actions { height: 3; align: right middle; }
+    #top-actions Button { width: auto; }
     """
 
     def compose(self) -> ComposeResult:
         yield Header()
+        with Horizontal(id="top-actions"):
+            yield Button("Opciones", id="options", variant="primary")
         yield Label("ocode · instancias OpenCode", classes="title")
 
         table = DataTable(id="projects")
@@ -1657,10 +1805,25 @@ class MainScreen(Screen):
             yield Button("Config global", id="global-config")
         yield Footer()
 
+    @on(Button.Pressed, "#options")
+    def options(self) -> None:
+        self.app.open_options(self)
+
     def on_mount(self) -> None:
         self.refresh_instance_statuses()
 
     def on_screen_resume(self) -> None:
+        table = self.query_one("#projects", DataTable)
+        projects = self.app.store.list_projects()
+        existing = {key.value for key in table.rows}
+        for project in projects:
+            if project.project_id not in existing:
+                profile = self.app.global_cfg.runtimes.get(project.runtime)
+                java = profile.java if profile else project.runtime
+                table.add_row(
+                    project.name, project.branch, java, "Consultando…",
+                    str(project.port), project.workspace, key=project.project_id,
+                )
         self.refresh_instance_statuses()
 
     @work(exclusive=True, group="instance-statuses")
@@ -1677,7 +1840,9 @@ class MainScreen(Screen):
             "dead": "Error",
             "removing": "Eliminándose",
         }
-        for row, project in enumerate(projects):
+        for project in projects:
+            if not any(key.value == project.project_id for key in table.rows):
+                continue
             try:
                 status = await asyncio.to_thread(
                     container_status,
@@ -1687,7 +1852,10 @@ class MainScreen(Screen):
                 label = labels.get(status, status)
             except Exception:
                 label = "No disponible"
-            table.update_cell_at(Coordinate(row, 3), label)
+            if any(key.value == project.project_id for key in table.rows):
+                table.update_cell_at(
+                    Coordinate(table.get_row_index(project.project_id), 3), label,
+                )
 
     def selected_project(self) -> str | None:
         table = self.query_one("#projects", DataTable)
@@ -1760,8 +1928,8 @@ class OcodeApp(App[LaunchRequest | None]):
     BINDINGS = [
         ("q", "quit", "Salir"),
         Binding("ctrl+p", "command_palette", "Atajos", priority=True, show=False),
-        Binding("alt+left", "navigation_back", "Atrás", priority=True),
-        Binding("alt+right", "navigation_forward", "Adelante", priority=True),
+        Binding("ctrl+left", "navigation_back", "Atrás", priority=True),
+        Binding("ctrl+right", "navigation_forward", "Adelante", priority=True),
     ]
 
     def __init__(self, store: Store, paths: Paths):
@@ -1857,57 +2025,60 @@ class OcodeApp(App[LaunchRequest | None]):
             self.push_screen(CommandPalette(placeholder="Buscar atajos…"))
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
-        yield SystemCommand("Salir", "Cerrar ocode sin detener las instancias", self.action_quit)
-        yield SystemCommand(
-            "Abrir AGENTS.md general", "Abrir en la aplicación predeterminada del host",
-            partial(self.open_host_path, self.paths.global_agents),
-        )
-        yield SystemCommand(
-            "Abrir opencode.jsonc general", "Abrir en la aplicación predeterminada del host",
-            partial(self.open_host_path, self.paths.opencode_config),
-        )
-        project_id = self.shortcut_project(screen)
-        for title, target in (
+        if self.can_navigate_back(screen):
+            yield SystemCommand("Atrás · Ctrl+←", "Volver a la pantalla anterior", self.action_navigation_back)
+        if self.can_navigate_forward(screen):
+            yield SystemCommand("Adelante · Ctrl+→", "Recuperar la pantalla siguiente", self.action_navigation_forward)
+        yield SystemCommand("Salir · q", "Cerrar ocode sin detener las instancias", self.action_quit)
+
+    def option_items(self, project_id: str | None) -> list[tuple[str, str]]:
+        if project_id is None:
+            return [
+                ("Abrir AGENTS.md general", "global_agents"),
+                ("Abrir opencode.jsonc general", "global_config"),
+                ("Abrir Skills generales", "global_skills"),
+                ("Buscar actualizaciones", "updates"),
+                ("Actualizar ocode", "update"),
+                ("Salir", "quit"),
+            ]
+        return [
             ("Abrir AGENTS.md del proyecto", "agents"),
             ("Abrir opencode.jsonc del proyecto", "config"),
+            ("Abrir Skills del proyecto", "skills"),
             ("Abrir sensitive-paths.txt del proyecto", "sensitive"),
             ("Ver almacenamiento del proyecto", "storage"),
-        ):
-            yield SystemCommand(
-                title, "Usar el proyecto abierto o seleccionado",
-                partial(self.open_project_path, project_id, target),
-            )
-        yield SystemCommand("Actualizar ocode", "Ejecutar update.cmd en el host", self.confirm_update)
-        yield SystemCommand(
-            "Buscar actualizaciones",
-            "Comprobar en GitHub si hay una versión nueva de ocode",
-            partial(self.check_updates_command, True),
-        )
-        yield SystemCommand(
-            f"{'Desactivar' if self.global_cfg.check_updates else 'Activar'}"
-            " comprobación automática",
-            "Comprobar si hay versiones nuevas al iniciar ocode",
-            self.toggle_update_checks,
-        )
-        if self.can_navigate_back(screen):
-            yield SystemCommand("Atrás", "Alt+← · Volver a la pantalla anterior", self.action_navigation_back)
-        if self.can_navigate_forward(screen):
-            yield SystemCommand("Adelante", "Alt+→ · Recuperar la pantalla siguiente", self.action_navigation_forward)
+            ("Buscar actualizaciones", "updates"),
+            ("Actualizar ocode", "update"),
+            ("Salir", "quit"),
+        ]
 
-    def shortcut_project(self, screen: Screen) -> str | None:
-        # Prefer the current project's settings/dialog over the main table.
-        project_id = getattr(screen, "project_id", None)
-        if project_id:
-            return project_id
-        if isinstance(screen, MainScreen):
-            return screen.selected_project()
-        for candidate in reversed(self.screen_stack):
-            project_id = getattr(candidate, "project_id", None)
-            if project_id:
-                return project_id
-            if isinstance(candidate, MainScreen):
-                return candidate.selected_project()
-        return None
+    def open_options(self, screen: Screen) -> None:
+        project_id = None
+        if not isinstance(screen, MainScreen):
+            for candidate in reversed(self.screen_stack):
+                if isinstance(candidate, ProjectScreen):
+                    project_id = candidate.project_id
+                    break
+                if isinstance(candidate, MainScreen):
+                    break
+                project_id = getattr(candidate, "project_id", None) or project_id
+        self.push_screen(OptionsScreen(project_id, self.option_items(project_id)))
+
+    def perform_option(self, action: str, project_id: str | None) -> None:
+        if action == "global_agents":
+            self.open_host_path(self.paths.global_agents)
+        elif action == "global_config":
+            self.open_host_path(self.paths.opencode_config)
+        elif action == "global_skills":
+            self.open_host_path(self.paths.global_skills)
+        elif action in {"agents", "config", "skills", "sensitive", "storage"}:
+            self.open_project_path(project_id, action)
+        elif action == "updates":
+            self.check_updates_command(True)
+        elif action == "update":
+            self.confirm_update()
+        elif action == "quit":
+            self.action_quit()
 
     def open_host_path(self, path: Path) -> bool:
         try:
@@ -1929,6 +2100,7 @@ class OcodeApp(App[LaunchRequest | None]):
         path = {
             "agents": self.paths.project_agents,
             "config": self.paths.project_config,
+            "skills": self.paths.project_skills,
             "sensitive": self.paths.project_sensitive_paths,
         }[target](project_id)
         self.open_host_path(path)
@@ -2016,12 +2188,3 @@ class OcodeApp(App[LaunchRequest | None]):
         busy.dismiss(None)
         if self.open_host_path(launcher):
             self.exit()
-
-    def toggle_update_checks(self) -> None:
-        self.global_cfg.check_updates = not self.global_cfg.check_updates
-        self.store.save_global(self.global_cfg)
-        state = "activada" if self.global_cfg.check_updates else "desactivada"
-        self.push_screen(MessageScreen(
-            "Actualizaciones",
-            f"Comprobación automática {state} al iniciar ocode.",
-        ))

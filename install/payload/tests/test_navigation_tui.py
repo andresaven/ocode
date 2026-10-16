@@ -36,10 +36,10 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
             field = settings.query_one("#workspace", Input)
             field.value = "edición sin guardar"
             field.focus()
-            await pilot.press("alt+left")
+            await pilot.press("ctrl+left")
             await pilot.pause()
             self.assertIs(app.screen, main)
-            await pilot.press("alt+right")
+            await pilot.press("ctrl+right")
             await pilot.pause()
             self.assertIs(app.screen, settings)
             self.assertEqual(settings.query_one("#workspace", Input).value, "edición sin guardar")
@@ -73,11 +73,11 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
             app.push_screen(second)
             await pilot.pause()
             for expected in (first, main):
-                await pilot.press("alt+left")
+                await pilot.press("ctrl+left")
                 await pilot.pause()
                 self.assertIs(app.screen, expected)
             for expected in (first, second):
-                await pilot.press("alt+right")
+                await pilot.press("ctrl+right")
                 await pilot.pause()
                 self.assertIs(app.screen, expected)
 
@@ -92,7 +92,7 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
             new = ProjectSettingsScreen("other")
             app.push_screen(new)
             await pilot.pause()
-            await pilot.press("alt+right")
+            await pilot.press("ctrl+right")
             await pilot.pause()
             self.assertIs(app.screen, new)
             self.assertFalse(app.can_navigate_forward())
@@ -109,7 +109,7 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
             for modal in (ConfirmScreen("Confirmar"), BusyScreen(), MessageScreen("Aviso", "Mensaje")):
                 app.push_screen(modal)
                 await pilot.pause()
-                await pilot.press("alt+left", "alt+right")
+                await pilot.press("ctrl+left", "ctrl+right")
                 await pilot.pause()
                 self.assertIs(app.screen, modal)
                 app.pop_screen()
@@ -144,7 +144,7 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
                 original = app.screen
                 if required:
                     self.assertIsInstance(original, ContainerRuntimeScreen)
-                await pilot.press("alt+left", "alt+right")
+                await pilot.press("ctrl+left", "ctrl+right")
                 await pilot.pause()
                 self.assertIs(app.screen, original)
                 self.assertFalse(app.can_navigate_back())
