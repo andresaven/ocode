@@ -1,5 +1,9 @@
 # Cambios
 
+## 0.7.1
+
+- Actualización de versión para validar el sistema de actualización automática.
+
 ## 0.7.0
 
 - ocode comprueba al iniciar si hay una versión nueva en GitHub y permite
