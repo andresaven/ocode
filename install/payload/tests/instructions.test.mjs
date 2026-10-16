@@ -22,7 +22,10 @@ test("effective instructions preserve global and project rules without editing s
   const options = fixture(t);
   const stop = syncInstructions({ ...options, onError: assert.fail });
   t.after(stop);
-  assert.equal(readFileSync(options.target, "utf8"), "Global guidance\n\nProject guidance");
+  const effective = readFileSync(options.target, "utf8");
+  assert.ok(effective.startsWith("Global guidance\n\nProject guidance\n\n"));
+  assert.match(effective, /globales prevalecen/);
+  assert.match(effective, /\/etc\/ocode\/project-AGENTS\.md/);
   assert.equal(readFileSync(options.globalSource, "utf8"), "\uFEFFGlobal guidance");
   assert.equal(readFileSync(options.projectSource, "utf8"), "Project guidance");
 });
@@ -31,7 +34,7 @@ test("disabled project rules do not remove global guidance", t => {
   const options = fixture(t);
   const stop = syncInstructions({ ...options, projectSource: undefined, onError: assert.fail });
   t.after(stop);
-  assert.equal(readFileSync(options.target, "utf8"), "Global guidance");
+  assert.match(readFileSync(options.target, "utf8"), /^Global guidance\n\nRegla de ocode:/);
 });
 
 test("missing instructions prevent startup", t => {
@@ -57,8 +60,8 @@ test("edits are synchronized and unreadable rules report a failure", { timeout: 
   writeFileSync(options.projectSource, "Edited project guidance");
   await waitFor(() => readFileSync(options.target, "utf8").includes("Edited project guidance"));
   writeFileSync(options.globalSource, "Edited global guidance");
-  await waitFor(() => readFileSync(options.target, "utf8") ===
-    "Edited global guidance\n\nEdited project guidance");
+  await waitFor(() => readFileSync(options.target, "utf8").startsWith(
+    "Edited global guidance\n\nEdited project guidance\n\nRegla de ocode:"));
   unlinkSync(options.projectSource);
   await waitFor(() => failure?.code === "ENOENT");
 });

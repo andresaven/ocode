@@ -1,6 +1,13 @@
 # Reglas globales para agentes (opencode)
 
 Aplican a todos los repos y sesiones; los proyectos solo añaden, nunca relajan.
+Si estas reglas globales contradicen las instrucciones de un proyecto, sigue las globales.
+
+## Archivos de instrucciones de ocode
+- Si el usuario pide crear, revisar o editar el AGENTS de este proyecto, usa `/etc/ocode/project-AGENTS.md`, aunque no mencione esa ruta ni sepas si ya existe. Informa al usuario de que las instrucciones quedaron en el AGENTS externo de la instancia.
+- No crees ni edites `/workspace/AGENTS.md` para una petición general sobre el AGENTS del proyecto: normalmente no existe y no hace falta dentro de la working copy. Usa esa ruta solo si el usuario pide expresamente crear o modificar el archivo dentro del repositorio.
+- El AGENTS específico añade contexto del proyecto y no puede relajar reglas globales.
+- Skills globales y específicas viven fuera de `/workspace`; las específicas de esta instancia están en `/etc/ocode/project-skills/`.
 
 Entorno monitorizado por EDR: todo proceso hijo de opencode es visible. Ya hubo una alerta
 **"Possible Search For Password Files"** por un barrido recursivo con PowerShell. No repetirlo.

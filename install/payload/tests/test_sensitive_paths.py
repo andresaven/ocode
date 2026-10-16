@@ -33,6 +33,26 @@ class SensitivePathsTests(unittest.TestCase):
         self.assertNotIn("sensitive_paths", json.loads(self.config.read_text()))
         self.assertEqual(self.store.get_project(self.project.project_id).maven_repository, "")
         self.assertEqual(self.store.get_project(self.project.project_id).build_paths, [])
+        self.assertTrue(self.paths.global_skills.is_dir())
+        self.assertTrue(self.paths.project_skills(self.project.project_id).is_dir())
+
+    def test_existing_global_config_keeps_skills_and_gets_ocode_source(self):
+        original = '{\n  "$schema": "https://opencode.ai/config.json",\n  "skills": ["./team-skills"],\n  "model": "local/model"\n}\n'
+        self.paths.opencode_config.write_text(original, encoding="utf-8")
+        self.store.initialize()
+        updated = self.paths.opencode_config.read_text(encoding="utf-8")
+        backup = self.paths.opencode_config.with_name(
+            self.paths.opencode_config.name + ".bak-pre-project-skills"
+        )
+        self.assertEqual(backup.read_text(encoding="utf-8"), original)
+        self.assertIn('"./team-skills"', updated)
+        self.assertIn('"/etc/ocode/project-skills"', updated)
+        self.assertIn('"local/model"', updated)
+        self.assertIn('"action": "edit"', updated)
+        self.assertIn('"/etc/ocode/project-AGENTS.md"', updated)
+        before = updated
+        self.store.initialize()
+        self.assertEqual(self.paths.opencode_config.read_text(encoding="utf-8"), before)
 
     def test_build_paths_setting_round_trips_without_changing_rules(self):
         original = self.rules.read_bytes()

@@ -27,6 +27,7 @@ class Paths:
         self.global_config = self.config_dir / "config.json"
         self.opencode_config = self.config_dir / "opencode.jsonc"
         self.global_agents = self.config_dir / "AGENTS.md"
+        self.global_skills = self.config_dir / "skills"
 
         self.default_agents = self.defaults_dir / "AGENTS.md"
         self.default_opencode_config = self.defaults_dir / "opencode.jsonc"
@@ -75,6 +76,9 @@ class Paths:
 
     def project_agents(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "AGENTS.md"
+
+    def project_skills(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "skills"
 
     def project_config(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "opencode.jsonc"

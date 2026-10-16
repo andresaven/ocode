@@ -263,9 +263,11 @@ La configuración activa vive fuera de la working copy:
 | `config\config.json` | Ajustes globales de ocode y motor de contenedores. |
 | `config\AGENTS.md` | Instrucciones globales para OpenCode. |
 | `config\opencode.jsonc` | Configuración global de OpenCode. |
+| `config\skills\` | Skills globales de OpenCode (`<id>\SKILL.md`). |
 | `projects\<Proyecto-Rama>\project.json` | Identidad, working copy y ajustes de la instancia. |
 | `projects\<Proyecto-Rama>\AGENTS.md` | Instrucciones específicas del proyecto. |
 | `projects\<Proyecto-Rama>\opencode.jsonc` | Configuración específica de OpenCode. |
+| `projects\<Proyecto-Rama>\skills\` | Skills específicas de esa instancia (`<id>\SKILL.md`). |
 | `projects\<Proyecto-Rama>\sensitive-paths.txt` | Reglas de protección mediante montajes. |
 
 `projects\` contiene configuración, **no una copia del repositorio**.
@@ -275,10 +277,20 @@ Las instrucciones específicas están activadas por defecto. La configuración
 específica `opencode.jsonc` está desactivada por defecto; ambas opciones se
 controlan desde **Ajustes**.
 
-Los `AGENTS.md` originales se montan en solo lectura bajo `/etc/ocode/`.
-ocode combina las instrucciones globales y las específicas activadas en el
-`AGENTS.md` global del contenedor y sincroniza los cambios mientras la
-instancia está encendida.
+El `AGENTS.md` global se monta en solo lectura; el específico se monta con
+escritura en `/etc/ocode/project-AGENTS.md` cuando está activado. ocode combina
+las instrucciones en el `AGENTS.md` global del contenedor y sincroniza sus
+cambios mientras la instancia está encendida. Las instrucciones globales indican que
+prevalecen ante contradicciones, aunque OpenCode combina instrucciones y no
+resuelve conflictos automáticamente. Una petición general para crear o editar
+el AGENTS del proyecto se aplica al archivo externo de la instancia; solo se
+crea o edita `/workspace/AGENTS.md` si se pide expresamente ese archivo del repo.
+
+Las skills globales se descubren desde la ubicación global de OpenCode. ocode
+monta las skills de cada proyecto fuera de `/workspace` y las registra desde la
+configuración global, por lo que no dependen de activar el JSONC específico.
+Las skills generales son de solo lectura; las del proyecto y el AGENTS
+específico permiten escritura desde OpenCode.
 
 La configuración global de OpenCode también se monta en solo lectura.
 La específica, cuando está activada, se monta en `/opencode.jsonc`, fuera
@@ -291,7 +303,9 @@ Los archivos `AGENTS.md` y `opencode.jsonc` propios del repositorio no se oculta
 
 Para aplicar cambios en `opencode.jsonc` o en la activación de los montajes,
 utiliza **Guardar y recrear contenedor**. Los cambios de contenido en los
-`AGENTS.md` ya montados se sincronizan sin recrear.
+`AGENTS.md` montados se sincronizan sin recrear. Los cambios de skills quedan
+visibles en las carpetas montadas; si la sesión no las detecta, inicia una nueva.
+Instancias existentes requieren recreación para incorporar los nuevos montajes.
 
 **Config global** abre la carpeta de configuración. Las plantillas de
 `app\defaults\` sirven para inicializar archivos; edita los archivos activos
