@@ -71,6 +71,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
     def make_app(self):
         cfg = GlobalConfig.defaults()
         cfg.container_runtime = ContainerRuntime(kind="docker")
+        cfg.check_updates = False
         project = ProjectConfig("demo", "Proyecto", "rama", ".")
         store = Mock()
         store.load_global.return_value = cfg

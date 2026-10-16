@@ -108,6 +108,8 @@ class GlobalConfig:
     security_no_new_privileges: bool = True
     cap_drop_all: bool = True
     default_maven_repository: str = ""
+    check_updates: bool = True
+    skipped_update_version: str = ""
     container_runtime: ContainerRuntime = field(default_factory=ContainerRuntime)
     runtimes: dict[str, RuntimeProfile] = field(default_factory=dict)
 
@@ -166,6 +168,8 @@ class GlobalConfig:
             ),
             cap_drop_all=bool(data.get("cap_drop_all", True)),
             default_maven_repository=data.get("default_maven_repository", ""),
+            check_updates=bool(data.get("check_updates", True)),
+            skipped_update_version=str(data.get("skipped_update_version", "")),
             container_runtime=runtime,
             runtimes=runtimes,
         )

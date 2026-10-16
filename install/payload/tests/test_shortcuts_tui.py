@@ -18,6 +18,7 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
     def make_app(self, home):
         cfg = GlobalConfig.defaults()
         cfg.container_runtime = ContainerRuntime(kind="docker")
+        cfg.check_updates = False
         store = Mock()
         store.load_global.return_value = cfg
         project = ProjectConfig("demo", "Proyecto", "rama", str(home / "workspace"))
@@ -30,8 +31,12 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
             app = self.make_app(Path(directory))
             async with app.run_test() as pilot:
                 commands = list(app.get_system_commands(app.screen))
-                self.assertEqual(len(commands), 8)
+                self.assertEqual(len(commands), 10)
                 self.assertEqual(commands[0].title, "Salir")
+                self.assertEqual(commands[-2].title, "Buscar actualizaciones")
+                self.assertEqual(
+                    commands[-1].title, "Desactivar comprobación automática"
+                )
                 self.assertNotIn("Theme", [command.title for command in commands])
                 self.assertEqual(app.active_bindings["ctrl+p"].binding.description, "Atajos")
                 self.assertFalse(app.active_bindings["ctrl+p"].binding.show)
@@ -55,7 +60,7 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
             with patch("ocode.tui.os.startfile", create=True) as startfile:
                 async with app.run_test():
                     commands = list(app.get_system_commands(app.screen))
-                    for command in commands[1:-2]:
+                    for command in commands[1:6]:
                         command.callback()
                     self.assertEqual([call.args[0] for call in startfile.call_args_list], expected)
                     app.store.save_project.assert_not_called()
@@ -67,9 +72,9 @@ class ShortcutTests(unittest.IsolatedAsyncioTestCase):
                  patch("ocode.tui.os.startfile", create=True) as startfile:
                 async with app.run_test() as pilot:
                     commands = list(app.get_system_commands(app.screen))
-                    commands[-2].callback()
+                    commands[6].callback()
                     await pilot.pause()
-                    self.assertEqual(commands[-2].title, "Ver almacenamiento del proyecto")
+                    self.assertEqual(commands[6].title, "Ver almacenamiento del proyecto")
                     self.assertIsInstance(app.screen, ProjectStorageScreen)
                     await app.screen.workers.wait_for_complete()
                     report.assert_called_once_with(

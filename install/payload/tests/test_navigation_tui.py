@@ -18,6 +18,7 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
     def make_app(self, required=False):
         cfg = GlobalConfig.defaults()
         cfg.container_runtime = ContainerRuntime(kind="unset" if required else "docker")
+        cfg.check_updates = False
         store = Mock()
         store.load_global.return_value = cfg
         project = ProjectConfig("demo", "Proyecto", "rama", ".")

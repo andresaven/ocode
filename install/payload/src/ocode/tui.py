@@ -62,6 +62,7 @@ from .storage import storage_report
 from .model import ProjectConfig, format_build_paths, parse_build_paths
 from .paths import Paths
 from .store import Store
+from .update import Release, check_for_update, stage_update
 
 
 @dataclass
@@ -186,6 +187,62 @@ class ConfirmScreen(ModalScreen[bool]):
     @on(Button.Pressed, "#no")
     def no(self) -> None:
         self.dismiss(False)
+
+
+class UpdateScreen(ModalScreen[str | None]):
+    CSS = """
+    UpdateScreen { align: center middle; }
+    #update {
+        width: 88%;
+        height: auto;
+        max-height: 85%;
+        border: round $accent;
+        padding: 1 2;
+        background: $surface;
+    }
+    #update #update-notes {
+        height: auto;
+        max-height: 18;
+        overflow-y: auto;
+        margin: 1 0;
+    }
+    #update Horizontal { height: 3; }
+    #update Button { width: auto; }
+    """
+
+    def __init__(self, release: Release, current: str):
+        super().__init__()
+        self.release = release
+        self.current = current
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="update"):
+            yield Label(
+                f"Nueva versión de ocode: {self.release.version}",
+                classes="title",
+            )
+            yield Static(
+                f"Instalada: ocode {self.current}\n"
+                f"Paquete: {self.release.archive_url}",
+            )
+            if self.release.notes:
+                yield Static(self.release.notes, id="update-notes")
+            with Horizontal():
+                yield Button("Actualizar", id="update-now", variant="success")
+                yield Button("Omitir esta versión", id="update-skip")
+                yield Button("Cancelar", id="update-cancel")
+
+    @on(Button.Pressed, "#update-now")
+    def choose_update(self) -> None:
+        self.dismiss("update")
+
+    @on(Button.Pressed, "#update-skip")
+    def choose_skip(self) -> None:
+        self.dismiss("skip")
+
+    @on(Button.Pressed, "#update-cancel")
+    def choose_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class DirectoryPickerScreen(ModalScreen[Path | None]):
@@ -1790,6 +1847,7 @@ class OcodeApp(App[LaunchRequest | None]):
             self.push_screen(ContainerRuntimeScreen(required=True))
         else:
             self.push_screen(MainScreen())
+            self.check_updates_command(False)
 
     def open_project(self, project_id: str) -> None:
         self.push_screen(ProjectScreen(project_id))
@@ -1820,6 +1878,17 @@ class OcodeApp(App[LaunchRequest | None]):
                 partial(self.open_project_path, project_id, target),
             )
         yield SystemCommand("Actualizar ocode", "Ejecutar update.cmd en el host", self.confirm_update)
+        yield SystemCommand(
+            "Buscar actualizaciones",
+            "Comprobar en GitHub si hay una versión nueva de ocode",
+            partial(self.check_updates_command, True),
+        )
+        yield SystemCommand(
+            f"{'Desactivar' if self.global_cfg.check_updates else 'Activar'}"
+            " comprobación automática",
+            "Comprobar si hay versiones nuevas al iniciar ocode",
+            self.toggle_update_checks,
+        )
         if self.can_navigate_back(screen):
             yield SystemCommand("Atrás", "Alt+← · Volver a la pantalla anterior", self.action_navigation_back)
         if self.can_navigate_forward(screen):
@@ -1874,3 +1943,85 @@ class OcodeApp(App[LaunchRequest | None]):
             "Extrae primero la nueva distribución en la carpeta de instalación.",
             confirm_label="Actualizar",
         ), confirmed)
+
+    @work(exclusive=True, group="update-check")
+    async def check_updates_command(self, manual: bool = False) -> None:
+        """Check GitHub for a newer ocode release.
+
+        Automatic checks stay silent unless a new version is available; manual
+        checks always report their result.
+        """
+        if not manual and not self.global_cfg.check_updates:
+            return
+
+        busy = None
+        if manual:
+            busy = BusyScreen("Buscando actualizaciones...")
+            self.push_screen(busy)
+            await asyncio.sleep(0)
+
+        try:
+            release = await asyncio.to_thread(check_for_update, __version__)
+        except Exception as exc:
+            # An update check must never break or block the TUI.
+            if busy is not None:
+                busy.dismiss(None)
+            if manual:
+                self.push_screen(MessageScreen("Actualizaciones", str(exc)))
+            return
+
+        if busy is not None:
+            busy.dismiss(None)
+
+        if release is None:
+            if manual:
+                self.push_screen(MessageScreen(
+                    "Actualizaciones",
+                    f"Ya tienes la última versión (ocode {__version__}).",
+                ))
+            return
+
+        if not manual and release.version == self.global_cfg.skipped_update_version:
+            return
+
+        self.prompt_update(release)
+
+    def prompt_update(self, release: Release) -> None:
+        def chosen(result: str | None) -> None:
+            if result == "update":
+                self.perform_update(release)
+            elif result == "skip":
+                self.global_cfg.skipped_update_version = release.version
+                self.store.save_global(self.global_cfg)
+                self.push_screen(MessageScreen(
+                    "Actualizaciones",
+                    f"Se omitirá ocode {release.version} en las comprobaciones automáticas.",
+                ))
+
+        self.push_screen(UpdateScreen(release, __version__), chosen)
+
+    @work(exclusive=True, group="update-install")
+    async def perform_update(self, release: Release) -> None:
+        busy = BusyScreen(f"Descargando ocode {release.version}...")
+        self.push_screen(busy)
+        await asyncio.sleep(0)
+        try:
+            launcher = await asyncio.to_thread(
+                stage_update, release, self.paths.home
+            )
+        except Exception as exc:
+            busy.dismiss(None)
+            self.push_screen(MessageScreen("Error de actualización", str(exc)))
+            return
+        busy.dismiss(None)
+        if self.open_host_path(launcher):
+            self.exit()
+
+    def toggle_update_checks(self) -> None:
+        self.global_cfg.check_updates = not self.global_cfg.check_updates
+        self.store.save_global(self.global_cfg)
+        state = "activada" if self.global_cfg.check_updates else "desactivada"
+        self.push_screen(MessageScreen(
+            "Actualizaciones",
+            f"Comprobación automática {state} al iniciar ocode.",
+        ))
