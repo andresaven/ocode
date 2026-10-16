@@ -582,6 +582,7 @@ def _tui_client_command(engine: Engine, name: str) -> list[str]:
     # or host command arguments. V2 clients use OPENCODE_PASSWORD.
     script = '''
 export OPENCODE_PASSWORD="$OPENCODE_SERVER_PASSWORD"
+printf '[ocode] TUI: servidor=http://127.0.0.1:%s\n' "${OCODE_BACKEND_PORT:-4097}"
 exec opencode --server "http://127.0.0.1:${OCODE_BACKEND_PORT:-4097}" /workspace
 '''
     return engine.command + ["exec", "-it", name, "sh", "-c", script]

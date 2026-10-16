@@ -71,6 +71,8 @@ def run_tui(store: Store, paths: Paths) -> int:
                    if preview.foreground_args is not None else
                    "Para desconectar sin detener: Ctrl+P, después Ctrl+Q.")
             )
+            if preview.foreground_args is not None:
+                print(f"[ocode] TUI: contenedor={preview.foreground_args[-4]}", flush=True)
             rc = launch_foreground(preview)
         except DockerError as exc:
             print(f"Error: {exc}", file=sys.stderr)

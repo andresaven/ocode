@@ -123,6 +123,27 @@ class PersistenceTests(unittest.TestCase):
                 self.assertNotIn(preview.server_password, preview.powershell())
                 self.assertNotIn(preview.web_token, preview.powershell())
 
+    def test_web_port_4097_uses_a_distinct_backend_for_tui(self):
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            paths = Paths(Path(directory))
+            paths.web_proxy_script.parent.mkdir(parents=True)
+            paths.web_proxy_script.touch()
+            paths.instructions_script.touch()
+            self.project.workspace = directory
+            self.project.port = 4097
+
+            preview = docker.build_run_command(
+                paths=paths, global_cfg=self.cfg, project=self.project,
+                mode="tui", detached=False,
+            )
+            self.assertIn("OCODE_PUBLIC_PORT=4097", preview.args)
+            self.assertIn("OCODE_BACKEND_PORT=4098", preview.args)
+            self.assertEqual(preview.foreground_args[3], self.project.container_name)
+            script = preview.foreground_args[-1]
+            self.assertIn('servidor=http://127.0.0.1:%s\\n', script)
+            self.assertIn('"${OCODE_BACKEND_PORT:-4097}"', script)
+            self.assertIn('--server "http://127.0.0.1:${OCODE_BACKEND_PORT:-4097}"', script)
+
     def test_foreground_starts_server_before_client(self):
         preview = docker.CommandPreview(
             ["docker", "start", "demo"],
