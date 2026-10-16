@@ -599,14 +599,34 @@ def sensitive_mount_report(
 
 
 def _tui_client_command(engine: Engine, name: str) -> list[str]:
-    # Resolve credentials inside the container, never through Docker inspect
-    # or host command arguments. V2 clients use OPENCODE_PASSWORD.
+    # Resolve the port and authentication inside the container. Passing a shell
+    # expansion through Docker on Windows can turn a set port into its fallback.
+    # V2 clients use OPENCODE_PASSWORD; do not pass it through host arguments.
     script = '''
-export OPENCODE_PASSWORD="$OPENCODE_SERVER_PASSWORD"
-printf '[ocode] TUI: servidor=http://127.0.0.1:%s\n' "${OCODE_BACKEND_PORT:-4097}"
-exec opencode --server "http://127.0.0.1:${OCODE_BACKEND_PORT:-4097}" /workspace
+const { spawn } = require("node:child_process");
+const port = Number(process.env.OCODE_BACKEND_PORT || 4097);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error("[ocode] Puerto interno de OpenCode inválido.");
+  process.exit(1);
+}
+const url = "http://127.0.0.1:" + port;
+console.log("[ocode] TUI: servidor=" + url);
+const client = spawn("opencode", ["--server", url, "/workspace"], {
+  stdio: "inherit",
+  env: { ...process.env, OPENCODE_PASSWORD: process.env.OPENCODE_SERVER_PASSWORD },
+});
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => client.kill(signal));
+}
+client.on("error", (error) => {
+  console.error("[ocode] No se pudo iniciar la TUI: " + error.message);
+  process.exitCode = 1;
+});
+client.on("close", (code, signal) => {
+  process.exitCode = code ?? (signal === "SIGINT" ? 130 : 1);
+});
 '''
-    return engine.command + ["exec", "-it", name, "sh", "-c", script]
+    return engine.command + ["exec", "-it", name, "node", "-e", script]
 
 
 def launch_foreground(preview):

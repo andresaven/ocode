@@ -75,10 +75,14 @@ class PersistenceTests(unittest.TestCase):
         preview = self.reuse("tui", False, 'shared|false|[]')
         self.assertEqual(preview.args, ["docker", "start", self.project.container_name])
         self.assertEqual(preview.foreground_args[:6], [
-            "docker", "exec", "-it", self.project.container_name, "sh", "-c",
+            "docker", "exec", "-it", self.project.container_name, "node", "-e",
         ])
-        self.assertIn('export OPENCODE_PASSWORD="$OPENCODE_SERVER_PASSWORD"', preview.foreground_args[-1])
-        self.assertIn("--server", preview.foreground_args[-1])
+        script = preview.foreground_args[-1]
+        self.assertIn('process.env.OCODE_BACKEND_PORT || 4097', script)
+        self.assertIn('OPENCODE_PASSWORD: process.env.OPENCODE_SERVER_PASSWORD', script)
+        self.assertIn('spawn("opencode", ["--server", url, "/workspace"]', script)
+        self.assertIn('stdio: "inherit"', script)
+        self.assertNotIn("${OCODE_BACKEND_PORT", script)
 
     def test_running_web_opens_tui_without_restart(self):
         preview = self.reuse("tui", True, 'serve|false|[]')
@@ -140,9 +144,9 @@ class PersistenceTests(unittest.TestCase):
             self.assertIn("OCODE_BACKEND_PORT=4098", preview.args)
             self.assertEqual(preview.foreground_args[3], self.project.container_name)
             script = preview.foreground_args[-1]
-            self.assertIn('servidor=http://127.0.0.1:%s\\n', script)
-            self.assertIn('"${OCODE_BACKEND_PORT:-4097}"', script)
-            self.assertIn('--server "http://127.0.0.1:${OCODE_BACKEND_PORT:-4097}"', script)
+            self.assertIn('process.env.OCODE_BACKEND_PORT || 4097', script)
+            self.assertIn('"http://127.0.0.1:" + port', script)
+            self.assertIn('"--server", url', script)
 
     def test_runtimes_pin_maven_without_building_images(self):
         with TemporaryDirectory(dir=Path(__file__).parent) as directory:
