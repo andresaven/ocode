@@ -8,7 +8,7 @@ import time
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
-from .model import GlobalConfig, ProjectConfig
+from .model import GlobalConfig, MAVEN_VERSION, ProjectConfig
 from .paths import Paths
 
 
@@ -205,9 +205,13 @@ def build_runtime(paths: Paths, cfg: GlobalConfig, profile_name: str):
     build_dir = paths.runtimes_dir / profile_name
     build_dir.mkdir(parents=True, exist_ok=True)
 
+    # Alpine 3.21 community publishes Maven 3.9.9-r0. Maven is a Java package;
+    # keep Java, Node and the other OS packages on the base image's branch.
     dockerfile = f"""FROM {cfg.opencode_image}
 USER root
-RUN apk add --no-cache {package} maven nodejs npm bash
+RUN apk add --no-cache {package} nodejs npm bash
+RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.21/community maven={MAVEN_VERSION}-r0
+RUN mvn -version
 ENTRYPOINT ["opencode"]
 """
     (build_dir / "Dockerfile").write_text(dockerfile, encoding="utf-8")
@@ -230,6 +234,19 @@ def _mount_volume(args, volume, target):
     args.extend(
         ["--mount", f"type=volume,source={volume},target={target}"]
     )
+
+
+def maven_repository_path(value: str) -> Path | None:
+    """Allow only an existing Maven artifact directory, never its parent."""
+    if not value.strip():
+        return None
+    path = Path(value.strip()).expanduser()
+    if not path.is_absolute() or not path.is_dir() or path.name.lower() != "repository":
+        raise DockerError("Indica una carpeta repository de Maven existente y absoluta.")
+    resolved = path.resolve()
+    if resolved.name.lower() != "repository" or "," in str(resolved) or "\n" in str(resolved):
+        raise DockerError("La ruta del repositorio Maven no es válida para el montaje.")
+    return resolved
 
 
 def _relative(value):
@@ -424,6 +441,10 @@ def build_run_command(
 
     _mount_volume(args, project.data_volume, "/root/.local/share/opencode")
     _mount_volume(args, project.state_volume, "/root/.local/state/opencode")
+
+    repository = maven_repository_path(project.maven_repository)
+    if repository is not None:
+        _mount_file(args, engine, repository, "/root/.m2/repository")
 
     resolved_sensitive, unresolved_sensitive = _resolve_sensitive_paths(
         workspace, project.sensitive_paths

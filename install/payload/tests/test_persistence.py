@@ -11,7 +11,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from ocode import docker
-from ocode.model import ContainerRuntime, GlobalConfig, ProjectConfig
+from ocode.model import ContainerRuntime, GlobalConfig, MAVEN_VERSION, ProjectConfig
 from ocode.paths import Paths
 
 
@@ -122,6 +122,73 @@ class PersistenceTests(unittest.TestCase):
                 self.assertEqual(preview.foreground_args is not None, mode == "tui")
                 self.assertNotIn(preview.server_password, preview.powershell())
                 self.assertNotIn(preview.web_token, preview.powershell())
+
+    def test_runtimes_pin_maven_without_building_images(self):
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            paths = Paths(Path(directory))
+            for name, profile in self.cfg.runtimes.items():
+                with self.subTest(name=name), patch.object(
+                    docker, "run_capture", return_value=Mock(stdout="preparado")
+                ) as run:
+                    self.assertIn(f"maven{MAVEN_VERSION}", profile.image)
+                    self.assertEqual(docker.build_runtime(paths, self.cfg, name), "preparado")
+                    dockerfile = (paths.runtimes_dir / name / "Dockerfile").read_text()
+                    self.assertIn(f"maven={MAVEN_VERSION}-r0", dockerfile)
+                    self.assertIn("alpine/v3.21/community", dockerfile)
+                    self.assertIn(f"apk add --no-cache openjdk{profile.java}-jdk", dockerfile)
+                    self.assertIn("RUN mvn -version", dockerfile)
+                    run.assert_called_once_with(docker.Engine("docker", ["docker"]), [
+                        "build", "-t", profile.image, str(paths.runtimes_dir / name),
+                    ])
+
+    def test_previous_runtime_image_is_replaced_by_maven_pinned_tag(self):
+        old = self.cfg.to_dict()
+        old["runtimes"]["java8"]["image"] = "ocode-runtime:2.0.24-java8"
+        loaded = GlobalConfig.from_dict(old)
+        self.assertEqual(loaded.runtimes["java8"].image,
+                         self.cfg.runtimes["java8"].image)
+
+    def test_maven_repository_is_optional_and_readonly(self):
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            repository = root / "mi usuario" / ".m2" / "repository"
+            repository.mkdir(parents=True)
+            paths = Paths(root / "ocode")
+            paths.web_proxy_script.parent.mkdir(parents=True)
+            paths.web_proxy_script.touch()
+            paths.instructions_script.touch()
+            self.project.workspace = directory
+            self.project.maven_repository = str(repository)
+
+            preview = docker.build_run_command(
+                paths=paths, global_cfg=self.cfg, project=self.project,
+                mode="tui", detached=False,
+            )
+            mounts = [preview.args[i + 1] for i, arg in enumerate(preview.args)
+                      if arg == "--mount"]
+            self.assertIn(
+                f"type=bind,source={repository},target=/root/.m2/repository,readonly",
+                mounts,
+            )
+            self.assertEqual(sum("target=/root/.m2/repository" in mount for mount in mounts), 1)
+            self.assertNotIn(str(repository.parent), mounts)
+
+            self.project.maven_repository = ""
+            preview = docker.build_run_command(
+                paths=paths, global_cfg=self.cfg, project=self.project,
+                mode="serve", detached=True,
+            )
+            self.assertNotIn("target=/root/.m2/repository", " ".join(preview.args))
+
+    def test_maven_repository_rejects_parent_missing_and_unsafe_path(self):
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            repository = Path(directory) / ".m2" / "repository"
+            repository.mkdir(parents=True)
+            for value in (str(repository.parent), str(repository / "missing"),
+                          str(Path(directory) / "missing"), "repository", str(repository) + ",other"):
+                with self.subTest(value=value):
+                    with self.assertRaises(docker.DockerError):
+                        docker.maven_repository_path(value)
 
     def test_foreground_starts_server_before_client(self):
         preview = docker.CommandPreview(

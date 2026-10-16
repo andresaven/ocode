@@ -6,6 +6,7 @@ import re
 
 OPENCODE_VERSION = "2.0.24"
 OPENCODE_IMAGE = f"ghcr.io/anomalyco/opencode:{OPENCODE_VERSION}"
+MAVEN_VERSION = "3.9.9"
 
 SENSITIVE_PATHS_FILENAME = "sensitive-paths.txt"
 
@@ -71,6 +72,7 @@ class GlobalConfig:
     opencode_image: str = OPENCODE_IMAGE
     security_no_new_privileges: bool = True
     cap_drop_all: bool = True
+    default_maven_repository: str = ""
     container_runtime: ContainerRuntime = field(default_factory=ContainerRuntime)
     runtimes: dict[str, RuntimeProfile] = field(default_factory=dict)
 
@@ -81,16 +83,16 @@ class GlobalConfig:
             container_runtime=ContainerRuntime(kind="unset", command=[]),
             runtimes={
                 "java8": RuntimeProfile(
-                    "java8", f"ocode-runtime:{OPENCODE_VERSION}-java8", "8", True
+                    "java8", f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java8", "8", True
                 ),
                 "java11": RuntimeProfile(
-                    "java11", f"ocode-runtime:{OPENCODE_VERSION}-java11", "11", True
+                    "java11", f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java11", "11", True
                 ),
                 "java17": RuntimeProfile(
-                    "java17", f"ocode-runtime:{OPENCODE_VERSION}-java17", "17", True
+                    "java17", f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java17", "17", True
                 ),
                 "java21": RuntimeProfile(
-                    "java21", f"ocode-runtime:{OPENCODE_VERSION}-java21", "21", True
+                    "java21", f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java21", "21", True
                 ),
             },
         )
@@ -102,8 +104,8 @@ class GlobalConfig:
     def from_dict(cls, data):
         defaults = cls.defaults()
         # Built-in Java runtimes are managed by ocode and tied to the
-        # OpenCode version. This intentionally replaces legacy tags such as
-        # `ocode-runtime:java8`, forcing a rebuild on OpenCode upgrades.
+        # OpenCode and Maven versions. This replaces earlier image tags and
+        # forces a rebuild when either runtime version changes.
         runtimes = dict(defaults.runtimes)
         runtimes.update({
             k: RuntimeProfile(**v)
@@ -128,6 +130,7 @@ class GlobalConfig:
                 data.get("security_no_new_privileges", True)
             ),
             cap_drop_all=bool(data.get("cap_drop_all", True)),
+            default_maven_repository=data.get("default_maven_repository", ""),
             container_runtime=runtime,
             runtimes=runtimes,
         )
@@ -145,6 +148,7 @@ class ProjectConfig:
     sensitive_paths: list[str] = field(default_factory=list)
     project_agents_enabled: bool = True
     project_config_enabled: bool = False
+    maven_repository: str = ""
 
     def to_dict(self):
         return asdict(self)

@@ -181,18 +181,44 @@ La pantalla **Java** lista los perfiles y sus imágenes:
 
 | Perfil | Imagen |
 | --- | --- |
-| Java 8 | `ocode-runtime:2.0.24-java8` |
-| Java 11 | `ocode-runtime:2.0.24-java11` |
-| Java 17 | `ocode-runtime:2.0.24-java17` |
-| Java 21 | `ocode-runtime:2.0.24-java21` |
+| Java 8 | `ocode-runtime:2.0.24-maven3.9.9-java8` |
+| Java 11 | `ocode-runtime:2.0.24-maven3.9.9-java11` |
+| Java 17 | `ocode-runtime:2.0.24-maven3.9.9-java17` |
+| Java 21 | `ocode-runtime:2.0.24-maven3.9.9-java21` |
 
 Selecciona un perfil y pulsa **Construir seleccionado** para preparar su imagen.
 Todos incluyen Maven y npm. Los Dockerfiles se generan en
 `runtimes\<perfil>\` a partir de `ghcr.io/anomalyco/opencode:2.0.24`.
+Maven se fija en la versión **3.9.9** del repositorio `community` de Alpine
+3.21; Java y los demás paquetes proceden de la distribución de la imagen
+base. La etiqueta nueva evita reutilizar imágenes anteriores con otra versión
+de Maven. Para aplicar el cambio a una instancia existente, prepara su
+runtime desde **Java / Maven** y usa **Guardar y recrear contenedor** en sus
+Ajustes; detenerla y arrancarla no cambia la imagen.
 
 Al abrir una instancia que todavía no tiene contenedor, ocode construye
 automáticamente el runtime si su imagen no está disponible. La primera
 apertura puede tardar mientras se descarga y construye la imagen.
+
+En **Ajustes** de cada instancia puedes indicar la ruta absoluta a tu carpeta
+Maven `.m2\repository` (opcional). ocode monta **solo esa carpeta** en
+`/root/.m2/repository`, en lectura. Maven ve las dependencias que descargues
+posteriormente en el equipo sin copiar la caché; usa `mvn -o` para compilar
+sin consultar repositorios remotos. La ruta debe existir y terminar en
+`repository`. Guardar este ajuste requiere confirmar la recreación del
+contenedor; detenerlo y arrancarlo no cambia los montajes.
+
+La pantalla **Java / Maven** permite guardar una ruta por defecto para
+**nuevas instancias**. Al añadir una working copy se muestra esa ruta y puedes
+cambiarla o dejarla vacía para no montar ninguna. Cada instancia conserva su
+propio valor: modificar el predeterminado no afecta a las existentes.
+
+OpenCode también puede leer los artefactos y metadatos de la carpeta montada.
+Comprueba por tu cuenta que no haya datos de acceso incrustados en ellos; ocode
+no monta el resto de `.m2` ni la configuración de Maven. El repositorio es de
+solo lectura para el contenedor: si Maven necesita escribir metadatos, alguna
+compilación puede fallar. Las dependencias no descargadas previamente en el
+equipo tampoco estarán disponibles en modo offline.
 
 ## Configuración e instrucciones
 
