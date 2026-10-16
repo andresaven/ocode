@@ -11,7 +11,11 @@ export function syncInstructions({ globalSource, projectSource, target, onError 
   function refresh() {
     const contents = sources.map(source =>
       readFileSync(source, "utf8").replace(/^\uFEFF/, ""),
-    ).join("\n\n");
+    ).join("\n\n") + "\n\n" +
+      "Regla de ocode: las instrucciones globales prevalecen ante contradicciones. " +
+      "Para cualquier petición general de crear o editar el AGENTS de este proyecto, usa /etc/ocode/project-AGENTS.md e informa al usuario de esa ruta. " +
+      "No crees /workspace/AGENTS.md para esa petición; úsalo solo si se pide expresamente crear o modificar el archivo dentro del repositorio. " +
+      "Las skills específicas están en /etc/ocode/project-skills/ y fuera del workspace.";
     if (contents === previous) return;
     mkdirSync(dirname(target), { recursive: true });
     // Atomic replacement avoids OpenCode reading partially written guidance.

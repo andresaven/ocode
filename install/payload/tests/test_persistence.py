@@ -364,6 +364,8 @@ class PersistenceTests(unittest.TestCase):
                     self.assertNotIn("/workspace/AGENTS.md", targets)
                     self.assertNotIn("/workspace/opencode.jsonc", targets)
                     self.assertIn("/etc/ocode/global-AGENTS.md", targets)
+                    self.assertIn("/root/.config/opencode/skills", targets)
+                    self.assertIn("/etc/ocode/project-skills", targets)
                     self.assertIn(
                         f"type=volume,source={self.project.data_volume},target=/root/.local/share/opencode",
                         mounts,
@@ -379,9 +381,15 @@ class PersistenceTests(unittest.TestCase):
                         "OCODE_PROJECT_AGENTS=/etc/ocode/project-AGENTS.md" in preview.args,
                         enabled,
                     )
-                    self.assertTrue(all(spec.endswith(",readonly") for spec in mounts
-                                        if spec.startswith("type=bind,")
-                                        and "target=/workspace" not in spec))
+                    mount_by_target = {
+                        spec.split("target=", 1)[1].split(",", 1)[0]: spec
+                        for spec in mounts if "target=" in spec
+                    }
+                    self.assertTrue(mount_by_target["/root/.config/opencode/skills"].endswith(",readonly"))
+                    self.assertFalse(mount_by_target["/etc/ocode/project-skills"].endswith(",readonly"))
+                    self.assertTrue(mount_by_target["/etc/ocode/global-AGENTS.md"].endswith(",readonly"))
+                    if enabled:
+                        self.assertFalse(mount_by_target["/etc/ocode/project-AGENTS.md"].endswith(",readonly"))
                     self.assertEqual(before, {p.name: p.read_bytes() for p in workspace.iterdir()})
 
     def test_running_server_is_not_started_on_tui_connect(self):

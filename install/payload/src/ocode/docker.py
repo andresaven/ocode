@@ -230,6 +230,13 @@ def _mount_file(args, engine, source, target, readonly=True):
     args.extend(["--mount", spec])
 
 
+def _mount_directory(args, engine, source, target, readonly=True):
+    spec = f"type=bind,source={engine.host_path(source)},target={target}"
+    if readonly:
+        spec += ",readonly"
+    args.extend(["--mount", spec])
+
+
 def _mount_volume(args, volume, target):
     args.extend(
         ["--mount", f"type=volume,source={volume},target={target}"]
@@ -479,11 +486,19 @@ def build_run_command(
         args, engine, paths.global_agents,
         "/etc/ocode/global-AGENTS.md",
     )
+    paths.global_skills.mkdir(parents=True, exist_ok=True)
+    project_skills = paths.project_skills(project.project_id)
+    project_skills.mkdir(parents=True, exist_ok=True)
+    _mount_directory(args, engine, paths.global_skills,
+                     "/root/.config/opencode/skills", readonly=True)
+    _mount_directory(args, engine, project_skills,
+                     "/etc/ocode/project-skills", readonly=False)
     args.extend(["-e", "OCODE_GLOBAL_AGENTS=/etc/ocode/global-AGENTS.md"])
 
     project_agents = paths.project_agents(project.project_id)
     if project.project_agents_enabled and project_agents.exists():
-        _mount_file(args, engine, project_agents, "/etc/ocode/project-AGENTS.md")
+        _mount_file(args, engine, project_agents, "/etc/ocode/project-AGENTS.md",
+                    readonly=False)
         args.extend(["-e", "OCODE_PROJECT_AGENTS=/etc/ocode/project-AGENTS.md"])
 
     project_config = paths.project_config(project.project_id)

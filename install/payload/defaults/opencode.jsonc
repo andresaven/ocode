@@ -6,6 +6,16 @@
   // (y notas contenido duplicado), puedes quitar esta linea.
   // Si {env:USERPROFILE} no se expande en tu version, usar la ruta absoluta.
   "instructions": ["~/.config/opencode/AGENTS.md"],
+  // ocode monta aquí las skills específicas de la instancia, fuera del workspace.
+  "skills": ["/etc/ocode/project-skills"],
+  "permissions": [
+    { "action": "external_directory", "resource": "/etc/ocode/project-skills/*", "effect": "allow" },
+    { "action": "read", "resource": "/etc/ocode/project-skills/*", "effect": "allow" },
+    { "action": "edit", "resource": "/etc/ocode/project-skills/*", "effect": "allow" },
+    { "action": "external_directory", "resource": "/etc/ocode/project-AGENTS.md", "effect": "allow" },
+    { "action": "read", "resource": "/etc/ocode/project-AGENTS.md", "effect": "allow" },
+    { "action": "edit", "resource": "/etc/ocode/project-AGENTS.md", "effect": "allow" }
+  ],
   // IMPORTANTE: en opencode gana la ULTIMA regla que coincide.
   // Por eso el comodin "*" va siempre primero y las reglas especificas despues.
   "permission": {
