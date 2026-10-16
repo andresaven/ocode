@@ -141,6 +141,129 @@ def _ensure_project_sensitive_permissions(path: Path) -> None:
 
     _ensure_sensitive_permissions(path)
 
+
+def _ensure_project_skills_source(path: Path) -> None:
+    """Add the external per-project skill source without replacing user config."""
+    text = path.read_text(encoding="utf-8")
+    entry = "/etc/ocode/project-skills"
+    marker = '"skills"'
+    start = text.find(marker)
+    if start >= 0:
+        match = re.match(r"\s*:\s*\[", text[start + len(marker):])
+        if not match:
+            raise RuntimeError(f"El campo skills no es un array en {path}")
+        opening = start + len(marker) + match.end() - 1
+        depth = 0
+        quoted = False
+        escaped = False
+        closing = -1
+        for index in range(opening, len(text)):
+            char = text[index]
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    quoted = False
+                continue
+            if char == '"':
+                quoted = True
+            elif char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+                if depth == 0:
+                    closing = index
+                    break
+        if closing < 0:
+            raise RuntimeError(f"Array skills sin cerrar en {path}")
+        if entry in text[opening:closing]:
+            return
+        content = text[opening + 1:closing]
+        separator = "" if not content.strip() or content.rstrip().endswith(",") else ","
+        updated = content.rstrip() + separator + f'\n    "{entry}",\n  '
+        text = text[:opening + 1] + updated + text[closing:]
+    else:
+        closing = text.rfind("}")
+        if closing < 0:
+            raise RuntimeError(f"JSONC inválido en {path}")
+        prefix = text[:closing].rstrip()
+        separator = "" if prefix.endswith("{") or prefix.endswith(",") else ","
+        text = prefix + separator + f'\n  "skills": ["{entry}"],\n' + text[closing:]
+    backup = path.with_name(path.name + ".bak-pre-project-skills")
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    path.write_text(text, encoding="utf-8")
+
+
+def _ensure_external_edit_rules(path: Path) -> None:
+    """Allow only the two ocode-managed project resources to be edited."""
+    text = path.read_text(encoding="utf-8")
+    rules = [
+        {"action": action, "resource": resource, "effect": "allow"}
+        for resource in ("/etc/ocode/project-skills/*", "/etc/ocode/project-AGENTS.md")
+        for action in ("external_directory", "read", "edit")
+    ]
+    marker = '"permissions"'
+    start = text.find(marker)
+    if start >= 0:
+        match = re.match(r"\s*:\s*\[", text[start + len(marker):])
+        if not match:
+            raise RuntimeError(f"El campo permissions no es un array en {path}")
+        opening = start + len(marker) + match.end() - 1
+        depth = 0
+        quoted = escaped = False
+        closing = -1
+        for index in range(opening, len(text)):
+            char = text[index]
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    quoted = False
+            elif char == '"':
+                quoted = True
+            elif char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+                if depth == 0:
+                    closing = index
+                    break
+        if closing < 0:
+            raise RuntimeError(f"Array permissions sin cerrar en {path}")
+        section = text[opening:closing]
+        def already_present(rule):
+            expression = (
+                r'\{\s*"action"\s*:\s*"' + re.escape(rule["action"]) +
+                r'"\s*,\s*"resource"\s*:\s*"' + re.escape(rule["resource"]) +
+                r'"\s*,\s*"effect"\s*:\s*"allow"\s*\}'
+            )
+            return re.search(expression, section) is not None
+
+        missing = [rule for rule in rules if not already_present(rule)]
+        if not missing:
+            return
+        content = text[opening + 1:closing]
+        separator = "" if not content.strip() or content.rstrip().endswith(",") else ","
+        inserted = ",\n    ".join(json.dumps(rule, ensure_ascii=False) for rule in missing)
+        text = text[:opening + 1] + content.rstrip() + separator + "\n    " + inserted + ",\n  " + text[closing:]
+    else:
+        closing = text.rfind("}")
+        if closing < 0:
+            raise RuntimeError(f"JSONC inválido en {path}")
+        prefix = text[:closing].rstrip()
+        separator = "" if prefix.endswith("{") or prefix.endswith(",") else ","
+        serialized = ",\n    ".join(json.dumps(rule, ensure_ascii=False) for rule in rules)
+        text = prefix + separator + '\n  "permissions": [\n    ' + serialized + "\n  ],\n" + text[closing:]
+    backup = path.with_name(path.name + ".bak-pre-project-skills")
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    path.write_text(text, encoding="utf-8")
+
 def _project_folder_base(name: str, branch: str) -> str:
     raw = f"{name}-{branch}".strip()
     # Windows-invalid filename characters and control chars.
@@ -236,6 +359,10 @@ class Store:
         if not self.paths.global_agents.exists():
             shutil.copy2(self.paths.default_agents, self.paths.global_agents)
 
+        self.paths.global_skills.mkdir(parents=True, exist_ok=True)
+        _ensure_project_skills_source(self.paths.opencode_config)
+        _ensure_external_edit_rules(self.paths.opencode_config)
+
         # Keep user configuration, but append mandatory ocode sensitive denies
         # if this installation predates them.
         _ensure_sensitive_permissions(self.paths.opencode_config)
@@ -250,6 +377,7 @@ class Store:
         }
 
         for project in self.list_projects():
+            self.paths.project_skills(project.project_id).mkdir(parents=True, exist_ok=True)
             changed = not self.paths.project_sensitive_paths(project.project_id).exists()
             migrated: list[str] = []
 
@@ -339,6 +467,7 @@ class Store:
             folder_base,
         )
         project_dir.mkdir(parents=True, exist_ok=False)
+        (project_dir / "skills").mkdir()
 
         project.save(project_dir / "project.json")
 

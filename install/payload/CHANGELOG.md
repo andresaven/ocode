@@ -1,5 +1,12 @@
 # Cambios
 
+## Próxima versión
+
+- Skills globales y por instancia fuera de la working copy; las skills del
+  proyecto se pueden editar desde OpenCode.
+- El AGENTS específico de la instancia se puede editar desde el contenedor y
+  queda diferenciado del AGENTS propio del repositorio.
+
 ## 0.7.1
 
 - Actualización de versión para validar el sistema de actualización automática.

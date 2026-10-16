@@ -757,7 +757,7 @@ class ProjectSettingsScreen(SaveRecreateScreen):
         yield Input(value=str(p.port), type="integer", id="port", classes="field")
 
         with Horizontal():
-            yield Label("Cargar AGENTS.md específico (fuera del workspace)")
+            yield Label("Cargar AGENTS.md específico editable (fuera del workspace)")
             yield Switch(value=p.project_agents_enabled, id="agents_enabled")
 
         with Horizontal():
