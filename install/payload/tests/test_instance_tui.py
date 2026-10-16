@@ -495,6 +495,69 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertLess(children.index(screen.query_one("#build").parent),
                             children.index(screen.query_one("#maven-section")))
 
+    async def test_add_project_validates_and_forwards_build_paths(self):
+        from tempfile import TemporaryDirectory
+
+        app = self.make_app()
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            (root / "wseganadero" / "target").mkdir(parents=True)
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(AddProjectScreen())
+                await pilot.pause()
+                screen = app.screen
+                screen.query_one("#workspace", Input).value = str(root)
+                screen.query_one("#build-paths", Input).value = "wseganadero/target"
+                with patch.object(app, "open_project"):
+                    await pilot.click("#save")
+                    await pilot.pause()
+                self.assertEqual(
+                    app.store.create_project.call_args.kwargs["build_paths"],
+                    ["wseganadero/target"],
+                )
+
+                app.store.create_project.reset_mock()
+                app.push_screen(AddProjectScreen())
+                await pilot.pause()
+                screen = app.screen
+                screen.query_one("#workspace", Input).value = str(root)
+                screen.query_one("#build-paths", Input).value = "/absoluto/target"
+                await pilot.click("#save")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                app.store.create_project.assert_not_called()
+
+    async def test_settings_build_path_rejects_protection_overlap(self):
+        from tempfile import TemporaryDirectory
+
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            root = Path(directory)
+            (root / "src" / "main" / "resources" / "certs").mkdir(parents=True)
+            (root / "wseganadero" / "target").mkdir(parents=True)
+            project.workspace = str(root)
+            project.sensitive_paths = ["**/src/main/resources/certs"]
+
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(ProjectSettingsScreen("demo"))
+                await pilot.pause()
+                app.screen.query_one("#build-paths", Input).value = (
+                    "src/main/resources/certs/extra"
+                )
+                await pilot.click("#save")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                app.store.save_project.assert_not_called()
+
+                app.pop_screen()
+                app.push_screen(ProjectSettingsScreen("demo"))
+                await pilot.pause()
+                app.screen.query_one("#build-paths", Input).value = "wseganadero/target"
+                await pilot.click("#save")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ConfirmScreen)
+
     async def test_protection_confirmation_cancel_and_save(self):
         app = self.make_app()
         app.store.get_project.return_value.sensitive_paths = []

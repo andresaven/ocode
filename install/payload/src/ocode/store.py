@@ -317,6 +317,7 @@ class Store:
         default_mode: str,
         port: int,
         maven_repository: str = "",
+        build_paths: list[str] | None = None,
     ) -> ProjectConfig:
         project_id = str(uuid.uuid4())
         project = ProjectConfig(
@@ -328,6 +329,7 @@ class Store:
             default_mode=default_mode,
             port=port,
             maven_repository=maven_repository,
+            build_paths=list(build_paths or []),
             sensitive_paths=list(BUILTIN_SENSITIVE_PATHS),
         )
 
