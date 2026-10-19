@@ -8,6 +8,7 @@ import time
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
+from . import providers
 from .model import GlobalConfig, MAVEN_VERSION, ProjectConfig, normalize_build_path
 from .paths import Paths
 
@@ -464,6 +465,16 @@ def build_run_command(
     args.append("-d")
     args.extend(["--name", project.container_name])
     args.extend(["--label", "io.ocode.mode=shared"])
+
+    # La clave de OpenCode Go viaja en un fichero de entorno: nunca en argv.
+    if providers.go_key_configured(paths):
+        args.extend(
+            ["--env-file", engine.host_path(providers.go_env_file(paths))]
+        )
+        fingerprint = providers.go_key_fingerprint(paths)
+        if fingerprint:
+            args.extend(["--label", f"io.ocode.opencode-go={fingerprint}"])
+
     args.extend(["--workdir", "/workspace"])
 
     if global_cfg.security_no_new_privileges:
@@ -791,6 +802,23 @@ def container_status(cfg: GlobalConfig, name: str) -> str:
     except (OSError, subprocess.SubprocessError) as exc:
         raise DockerError("No se pudo consultar el estado de la instancia.") from exc
     return cp.stdout.strip() or "absent"
+
+
+def opencode_go_stale(cfg: GlobalConfig, paths: Paths, name: str) -> bool:
+    """Compare only the OpenCode Go label; never inspect the environment."""
+    expected = providers.go_key_fingerprint(paths) or ""
+    engine = resolve_engine(cfg)
+    cp = run_capture(
+        engine,
+        [
+            "inspect", name, "--format",
+            '{{index .Config.Labels "io.ocode.opencode-go"}}',
+        ],
+    )
+    label = cp.stdout.strip()
+    if label == "<no value>":
+        label = ""
+    return label != expected
 
 
 def container_published_ports(cfg: GlobalConfig, name: str) -> set[int]:

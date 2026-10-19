@@ -28,6 +28,7 @@ class Paths:
         self.opencode_config = self.config_dir / "opencode.jsonc"
         self.global_agents = self.config_dir / "AGENTS.md"
         self.global_skills = self.config_dir / "skills"
+        self.secrets_dir = self.config_dir / "secrets"
 
         self.default_agents = self.defaults_dir / "AGENTS.md"
         self.default_opencode_config = self.defaults_dir / "opencode.jsonc"

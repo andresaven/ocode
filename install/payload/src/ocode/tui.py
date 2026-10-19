@@ -32,6 +32,7 @@ from textual.widgets import (
 )
 
 from . import __version__
+from . import providers
 from .docker import (
     DockerError,
     build_launch_command,
@@ -47,6 +48,7 @@ from .docker import (
     inspect_volumes,
     launch_detached,
     maven_repository_path,
+    opencode_go_stale,
     prepare_web_login,
     recreate_container,
     remove_container,
@@ -1111,6 +1113,148 @@ class JavaScreen(Screen):
         self.app.action_navigation_back()
 
 
+class ProveedoresScreen(Screen):
+    CSS = """
+    ProveedoresScreen { padding: 1 3; }
+    #proveedores-content { height: 1fr; }
+    .hint { color: $text-muted; margin-bottom: 1; }
+    #back { width: auto; margin-bottom: 1; }
+    #go-key { margin-bottom: 1; }
+    #go-status-box {
+        height: auto;
+        border: round $primary;
+        padding: 1 2;
+        margin-bottom: 1;
+    }
+    #go-status { height: auto; }
+    .section-title { text-style: bold; margin-bottom: 1; }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Button("← Volver", id="back", variant="primary")
+        yield Label("Proveedores", classes="title")
+        with VerticalScroll(id="proveedores-content"):
+            yield Static(
+                "La clave se guarda en config\\secrets\\opencode-go.env y se "
+                "inyecta en los contenedores con --env-file: no aparece en la "
+                "línea de comandos ni en «Comando Docker». Es una única clave "
+                "global; los contenedores existentes necesitan «Guardar y "
+                "recrear contenedor».",
+                classes="hint",
+                markup=False,
+            )
+            with Vertical(id="go-status-box"):
+                yield Label("OpenCode Go", classes="section-title")
+                yield Static("", id="go-status", markup=False)
+            yield Static(
+                "Los modelos se usan con el prefijo opencode-go/<modelo>.",
+                classes="hint",
+                markup=False,
+            )
+            yield Input(
+                value="",
+                placeholder="Introduce la API key de OpenCode Go",
+                password=True,
+                id="go-key",
+            )
+            with Horizontal():
+                yield Button("Guardar", id="go-save", variant="success")
+                yield Button("Borrar", id="go-clear", variant="warning")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.refresh_status()
+
+    def refresh_status(self) -> None:
+        status = self.query_one("#go-status", Static)
+        if not providers.go_key_configured(self.app.paths):
+            status.update("Clave no configurada.")
+            return
+        last4 = providers.go_key_last4(self.app.paths)
+        suffix = f" (…{last4})" if last4 else ""
+        status.update(f"Clave configurada{suffix}.")
+
+    @on(Button.Pressed, "#go-save")
+    async def save(self) -> None:
+        value = self.query_one("#go-key", Input).value
+        try:
+            providers.save_go_key(self.app.paths, value)
+        except ValueError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
+        except OSError as exc:
+            self.app.push_screen(
+                MessageScreen("Error", f"No se pudo guardar la clave: {exc}")
+            )
+            return
+        self.query_one("#go-key", Input).value = ""
+        self.refresh_status()
+        await self.report_stale("Clave guardada")
+
+    @on(Input.Submitted, "#go-key")
+    async def submit(self) -> None:
+        await self.save()
+
+    @on(Button.Pressed, "#go-clear")
+    async def clear(self) -> None:
+        try:
+            providers.clear_go_key(self.app.paths)
+        except OSError as exc:
+            self.app.push_screen(
+                MessageScreen("Error", f"No se pudo borrar la clave: {exc}")
+            )
+            return
+        self.query_one("#go-key", Input).value = ""
+        self.refresh_status()
+        await self.report_stale("Clave borrada")
+
+    async def report_stale(self, action: str) -> None:
+        names: list[str] = []
+        unknown = False
+        for project in self.app.store.list_projects():
+            try:
+                exists = await asyncio.to_thread(
+                    container_exists,
+                    self.app.global_cfg,
+                    project.container_name,
+                )
+                if not exists:
+                    continue
+                stale = await asyncio.to_thread(
+                    opencode_go_stale,
+                    self.app.global_cfg,
+                    self.app.paths,
+                    project.container_name,
+                )
+            except Exception:
+                unknown = True
+                continue
+            if stale:
+                names.append(f"- {project.name} / {project.branch}")
+
+        if names:
+            message = (
+                f"{action}. Instancias con contenedor desactualizado:\n"
+                + "\n".join(names)
+                + "\n\nAbre Ajustes en cada instancia y usa «Guardar y recrear "
+                "contenedor» para aplicar la clave. No se ha recreado nada "
+                "automáticamente."
+            )
+        elif unknown:
+            message = (
+                f"{action}. No se pudo comprobar si hay instancias "
+                "desactualizadas. Revisa el motor en Diagnóstico."
+            )
+        else:
+            message = f"{action}. No hay instancias que necesiten recreación."
+        self.app.push_screen(MessageScreen("Proveedores", message))
+
+    @on(Button.Pressed, "#back")
+    def back(self) -> None:
+        self.app.action_navigation_back()
+
+
 class ProjectScreen(Screen):
     CSS = """
     ProjectScreen { padding: 1 3; }
@@ -1136,6 +1280,7 @@ class ProjectScreen(Screen):
     .section-help { height: auto; margin-bottom: 1; }
     #danger-zone { border: round $error; }
     #instance-status { height: auto; margin-bottom: 1; }
+    #go-stale-notice { height: auto; margin-bottom: 1; color: $warning; }
     #navigation { height: auto; }
     #back { width: auto; margin-bottom: 1; }
     #top-actions { height: 3; align: right middle; }
@@ -1159,6 +1304,7 @@ class ProjectScreen(Screen):
         with VerticalScroll(id="instance-content"):
             yield Static(self._summary(), id="info", markup=False)
             yield Static("Estado: consultando...", id="instance-status", markup=False)
+            yield Static("", id="go-stale-notice", markup=False)
             with Vertical(classes="action-group"):
                 yield Label("Uso", classes="section-title")
                 yield Static(
@@ -1227,7 +1373,9 @@ class ProjectScreen(Screen):
     @work(exclusive=True)
     async def refresh_status(self) -> None:
         status_widget = self.query_one("#instance-status", Static)
+        notice = self.query_one("#go-stale-notice", Static)
         status_widget.update("Estado: consultando...")
+        notice.update("")
         try:
             status = await asyncio.to_thread(
                 container_status, self.app.global_cfg, self.project().container_name,
@@ -1245,6 +1393,24 @@ class ProjectScreen(Screen):
             status_widget.update(f"Estado: {label}")
         except Exception:
             status_widget.update("Estado: no disponible. Comprueba el motor en Diagnóstico.")
+            return
+
+        if status == "absent":
+            return
+        try:
+            stale = await asyncio.to_thread(
+                opencode_go_stale,
+                self.app.global_cfg,
+                self.app.paths,
+                self.project().container_name,
+            )
+        except Exception:
+            return
+        if stale:
+            notice.update(
+                "Clave de OpenCode Go desactualizada en este contenedor. "
+                "Usa «Guardar y recrear contenedor» en Ajustes."
+            )
 
 
     def _protection_notice(self, project: ProjectConfig) -> str:
@@ -1764,8 +1930,8 @@ class MainScreen(Screen):
     #projects { height: 1fr; border: round $primary; }
     #toolbar {
         height: 6;
-        grid-size: 3;
-        grid-columns: 1fr 1fr 1fr;
+        grid-size: 4;
+        grid-columns: 1fr 1fr 1fr 1fr;
         grid-rows: 3 3;
     }
     #toolbar Button { width: 1fr; }
@@ -1800,6 +1966,7 @@ class MainScreen(Screen):
             yield Button("Añadir", id="add", variant="success")
             yield Button("Gestionar instancia", id="open", variant="primary")
             yield Button("Java / Maven", id="java")
+            yield Button("Proveedores", id="providers")
             yield Button("Motor", id="container-runtime")
             yield Button("Diagnóstico", id="doctor")
             yield Button("Config global", id="global-config")
@@ -1882,6 +2049,10 @@ class MainScreen(Screen):
     @on(Button.Pressed, "#java")
     def java(self) -> None:
         self.app.push_screen(JavaScreen())
+
+    @on(Button.Pressed, "#providers")
+    def open_providers(self) -> None:
+        self.app.push_screen(ProveedoresScreen())
 
     @on(Button.Pressed, "#container-runtime")
     def container_runtime(self) -> None:
