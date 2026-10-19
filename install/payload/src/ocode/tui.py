@@ -1362,7 +1362,16 @@ class ProjectScreen(Screen):
             f"Reglas de protección: {len(p.sensitive_paths)}",
         ])
 
+    def _exists(self) -> bool:
+        try:
+            self.app.store.get_project(self.project_id)
+        except (OSError, ValueError):
+            return False
+        return True
+
     def on_screen_resume(self) -> None:
+        if not self._exists():
+            return
         self.query_one("#info", Static).update(self._summary())
         self.refresh_status()
 
@@ -1372,6 +1381,8 @@ class ProjectScreen(Screen):
 
     @work(exclusive=True)
     async def refresh_status(self) -> None:
+        if not self._exists():
+            return
         status_widget = self.query_one("#instance-status", Static)
         notice = self.query_one("#go-stale-notice", Static)
         status_widget.update("Estado: consultando...")
