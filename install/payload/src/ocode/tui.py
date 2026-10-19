@@ -1928,12 +1928,13 @@ class MainScreen(Screen):
     CSS = """
     MainScreen { padding: 1 3; }
     #projects { height: 1fr; border: round $primary; }
-    #toolbar {
-        height: 6;
+    #toolbar { height: 6; }
+    #toolbar-primary {
+        height: 3;
         grid-size: 4;
         grid-columns: 1fr 1fr 1fr 1fr;
-        grid-rows: 3 3;
     }
+    #toolbar-secondary { height: 3; }
     #toolbar Button { width: 1fr; }
     #top-actions { height: 3; align: right middle; }
     #top-actions Button { width: auto; }
@@ -1962,14 +1963,16 @@ class MainScreen(Screen):
         table.cursor_type = "row"
         yield table
 
-        with Grid(id="toolbar"):
-            yield Button("Añadir", id="add", variant="success")
-            yield Button("Gestionar instancia", id="open", variant="primary")
-            yield Button("Java / Maven", id="java")
-            yield Button("Proveedores", id="providers")
-            yield Button("Motor", id="container-runtime")
-            yield Button("Diagnóstico", id="doctor")
-            yield Button("Config global", id="global-config")
+        with Vertical(id="toolbar"):
+            with Grid(id="toolbar-primary"):
+                yield Button("Añadir", id="add", variant="success")
+                yield Button("Gestionar instancia", id="open", variant="primary")
+                yield Button("Java / Maven", id="java")
+                yield Button("Proveedores", id="providers")
+            with Horizontal(id="toolbar-secondary"):
+                yield Button("Motor", id="container-runtime")
+                yield Button("Diagnóstico", id="doctor")
+                yield Button("Config global", id="global-config")
         yield Footer()
 
     @on(Button.Pressed, "#options")
