@@ -466,14 +466,16 @@ def build_run_command(
     args.extend(["--name", project.container_name])
     args.extend(["--label", "io.ocode.mode=shared"])
 
-    # La clave de OpenCode Go viaja en un fichero de entorno: nunca en argv.
-    if providers.go_key_configured(paths):
+    # Las claves de proveedores viajan en ficheros de entorno: nunca en argv.
+    for provider in providers.PROVIDERS.values():
+        if not providers.key_configured(paths, provider.id):
+            continue
         args.extend(
-            ["--env-file", engine.host_path(providers.go_env_file(paths))]
+            ["--env-file", engine.host_path(providers.env_file(paths, provider.id))]
         )
-        fingerprint = providers.go_key_fingerprint(paths)
+        fingerprint = providers.key_fingerprint(paths, provider.id)
         if fingerprint:
-            args.extend(["--label", f"io.ocode.opencode-go={fingerprint}"])
+            args.extend(["--label", f"{provider.label}={fingerprint}"])
 
     args.extend(["--workdir", "/workspace"])
 
@@ -804,21 +806,30 @@ def container_status(cfg: GlobalConfig, name: str) -> str:
     return cp.stdout.strip() or "absent"
 
 
-def opencode_go_stale(cfg: GlobalConfig, paths: Paths, name: str) -> bool:
-    """Compare only the OpenCode Go label; never inspect the environment."""
-    expected = providers.go_key_fingerprint(paths) or ""
+def stale_providers(cfg: GlobalConfig, paths: Paths, name: str) -> list[str]:
+    """Ids de proveedores cuya etiqueta no coincide con la clave configurada.
+
+    Compara solo etiquetas; nunca inspecciona el entorno del contenedor.
+    """
     engine = resolve_engine(cfg)
     cp = run_capture(
         engine,
-        [
-            "inspect", name, "--format",
-            '{{index .Config.Labels "io.ocode.opencode-go"}}',
-        ],
+        ["inspect", name, "--format", "{{json .Config.Labels}}"],
     )
-    label = cp.stdout.strip()
-    if label == "<no value>":
-        label = ""
-    return label != expected
+    try:
+        labels = json.loads(cp.stdout or "null") or {}
+    except json.JSONDecodeError as exc:
+        raise DockerError("No se pudieron leer las etiquetas del contenedor.") from exc
+    if not isinstance(labels, dict):
+        labels = {}
+
+    stale = []
+    for provider in providers.PROVIDERS.values():
+        expected = providers.key_fingerprint(paths, provider.id) or ""
+        actual = labels.get(provider.label) or ""
+        if actual != expected:
+            stale.append(provider.id)
+    return stale
 
 
 def container_published_ports(cfg: GlobalConfig, name: str) -> set[int]:

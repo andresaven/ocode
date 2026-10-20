@@ -1,56 +1,93 @@
-"""Clave global de OpenCode Go y su fichero de entorno.
+"""Claves globales de proveedores y sus ficheros de entorno.
 
-La clave se guarda en `config\\secrets\\opencode-go.env` y se inyecta en cada
+Cada clave se guarda en `config\\secrets\\<id>.env` y se inyecta en cada
 contenedor con `--env-file`, de modo que nunca aparece en la línea de comandos
 ni en la vista «Comando Docker». Este módulo no registra ni imprime la clave.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 
-ENV_VAR = "OPENCODE_API_KEY"
-FILENAME = "opencode-go.env"
+
+@dataclass(frozen=True)
+class Provider:
+    id: str
+    name: str
+    env_var: str
+    filename: str
+    label: str
+    hint: str
+
+
+PROVIDERS: dict[str, Provider] = {
+    "opencode-go": Provider(
+        id="opencode-go",
+        name="OpenCode Go",
+        env_var="OPENCODE_API_KEY",
+        filename="opencode-go.env",
+        label="io.ocode.opencode-go",
+        hint="opencode-go/<modelo>",
+    ),
+    "openai": Provider(
+        id="openai",
+        name="OpenAI",
+        env_var="OPENAI_API_KEY",
+        filename="openai.env",
+        label="io.ocode.openai",
+        hint="openai/<modelo>",
+    ),
+}
+
 MIN_LENGTH = 16
 
 
-def go_env_file(paths) -> Path:
+def provider(provider_id: str) -> Provider:
+    try:
+        return PROVIDERS[provider_id]
+    except KeyError:
+        raise KeyError(f"Proveedor desconocido: {provider_id}") from None
+
+
+def env_file(paths, provider_id: str) -> Path:
     """Ruta del fichero de entorno, exista o no."""
-    return paths.secrets_dir / FILENAME
+    return paths.secrets_dir / provider(provider_id).filename
 
 
-def go_key_configured(paths) -> bool:
-    return _read_key(go_env_file(paths)) is not None
+def key_configured(paths, provider_id: str) -> bool:
+    return _read_key(env_file(paths, provider_id), provider(provider_id).env_var) is not None
 
 
-def go_key_fingerprint(paths) -> str | None:
-    key = _read_key(go_env_file(paths))
+def key_fingerprint(paths, provider_id: str) -> str | None:
+    key = _read_key(env_file(paths, provider_id), provider(provider_id).env_var)
     if key is None:
         return None
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
 
 
-def go_key_last4(paths) -> str | None:
-    key = _read_key(go_env_file(paths))
+def key_last4(paths, provider_id: str) -> str | None:
+    key = _read_key(env_file(paths, provider_id), provider(provider_id).env_var)
     if key is None or len(key) < 4:
         return None
     return key[-4:]
 
 
-def save_go_key(paths, key: str) -> None:
+def save_key(paths, provider_id: str, key: str) -> None:
     """Valida y guarda la clave de forma atómica. Nunca incluye la clave en errores."""
+    entry = provider(provider_id)
     value = _validate(key)
-    path = go_env_file(paths)
+    path = env_file(paths, provider_id)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    fd, temp_name = tempfile.mkstemp(prefix=".opencode-go-", dir=path.parent)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{entry.id}-", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(f"{ENV_VAR}={value}\n")
+            handle.write(f"{entry.env_var}={value}\n")
         _restrict_permissions(Path(temp_name))
         os.replace(temp_name, path)
     finally:
@@ -60,10 +97,10 @@ def save_go_key(paths, key: str) -> None:
             pass
 
 
-def clear_go_key(paths) -> None:
+def clear_key(paths, provider_id: str) -> None:
     """Elimina la clave; no falla si ya no existe."""
     try:
-        go_env_file(paths).unlink()
+        env_file(paths, provider_id).unlink()
     except FileNotFoundError:
         pass
 
@@ -86,7 +123,7 @@ def _validate(key: str) -> str:
     return value
 
 
-def _read_key(path: Path) -> str | None:
+def _read_key(path: Path, env_var: str) -> str | None:
     """Lee la primera entrada válida; un fichero vacío o mal formado no cuenta."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -97,7 +134,7 @@ def _read_key(path: Path) -> str | None:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         name, separator, value = line.partition("=")
-        if not separator or name != ENV_VAR:
+        if not separator or name != env_var:
             continue
         try:
             valid = _validate(value)

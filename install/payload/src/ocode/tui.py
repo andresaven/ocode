@@ -48,13 +48,13 @@ from .docker import (
     inspect_volumes,
     launch_detached,
     maven_repository_path,
-    opencode_go_stale,
     prepare_web_login,
     recreate_container,
     remove_container,
     remove_state,
     sensitive_applied_paths,
     sensitive_mount_report,
+    stale_providers,
     stop_container,
     validate_build_paths,
 )
@@ -1113,20 +1113,103 @@ class JavaScreen(Screen):
         self.app.action_navigation_back()
 
 
+class ProviderKeyScreen(ModalScreen[str | None]):
+    CSS = """
+    ProviderKeyScreen { align: center middle; }
+    #provider-key {
+        width: 72%;
+        height: auto;
+        border: round $primary;
+        padding: 1 2;
+        background: $surface;
+    }
+    #provider-status { margin-bottom: 1; }
+    #provider-input { margin-bottom: 1; }
+    #provider-actions { height: 3; }
+    #provider-actions Button { width: 1fr; margin-right: 1; }
+    """
+
+    def __init__(self, provider_id: str):
+        super().__init__()
+        self.provider = providers.provider(provider_id)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="provider-key"):
+            yield Label(self.provider.name, classes="title")
+            yield Static("", id="provider-status", markup=False)
+            yield Input(
+                value="",
+                placeholder=f"Introduce la API key de {self.provider.name}",
+                password=True,
+                id="provider-input",
+            )
+            with Horizontal(id="provider-actions"):
+                yield Button("Guardar", id="provider-save", variant="success")
+                if providers.key_configured(self.app.paths, self.provider.id):
+                    yield Button("Borrar", id="provider-clear", variant="warning")
+                yield Button("Cancelar", id="provider-cancel")
+
+    def on_mount(self) -> None:
+        self.refresh_status()
+        self.query_one("#provider-input", Input).focus()
+
+    def refresh_status(self) -> None:
+        status = self.query_one("#provider-status", Static)
+        if not providers.key_configured(self.app.paths, self.provider.id):
+            status.update("Clave no configurada.")
+            return
+        last4 = providers.key_last4(self.app.paths, self.provider.id)
+        suffix = f" (…{last4})" if last4 else ""
+        status.update(f"Clave configurada{suffix}.")
+
+    @on(Button.Pressed, "#provider-save")
+    async def save(self) -> None:
+        value = self.query_one("#provider-input", Input).value
+        try:
+            providers.save_key(self.app.paths, self.provider.id, value)
+        except ValueError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
+        except OSError as exc:
+            self.app.push_screen(
+                MessageScreen("Error", f"No se pudo guardar la clave: {exc}")
+            )
+            return
+        self.dismiss("Clave guardada")
+
+    @on(Input.Submitted, "#provider-input")
+    async def submit(self) -> None:
+        await self.save()
+
+    @on(Button.Pressed, "#provider-clear")
+    def clear(self) -> None:
+        try:
+            providers.clear_key(self.app.paths, self.provider.id)
+        except OSError as exc:
+            self.app.push_screen(
+                MessageScreen("Error", f"No se pudo borrar la clave: {exc}")
+            )
+            return
+        self.dismiss("Clave borrada")
+
+    @on(Button.Pressed, "#provider-cancel")
+    def cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ProveedoresScreen(Screen):
     CSS = """
     ProveedoresScreen { padding: 1 3; }
     #proveedores-content { height: 1fr; }
     .hint { color: $text-muted; margin-bottom: 1; }
     #back { width: auto; margin-bottom: 1; }
-    #go-key { margin-bottom: 1; }
-    #go-status-box {
+    #providers-list {
         height: auto;
+        max-height: 12;
         border: round $primary;
-        padding: 1 2;
         margin-bottom: 1;
     }
-    #go-status { height: auto; }
+    #providers-list ListItem { padding: 0 1; }
     .section-title { text-style: bold; margin-bottom: 1; }
     """
 
@@ -1136,78 +1219,58 @@ class ProveedoresScreen(Screen):
         yield Label("Proveedores", classes="title")
         with VerticalScroll(id="proveedores-content"):
             yield Static(
-                "La clave se guarda en config\\secrets\\opencode-go.env y se "
-                "inyecta en los contenedores con --env-file: no aparece en la "
-                "línea de comandos ni en «Comando Docker». Es una única clave "
-                "global; los contenedores existentes necesitan «Guardar y "
-                "recrear contenedor».",
+                "Cada clave se guarda en config\\secrets y se inyecta en los "
+                "contenedores con --env-file: no aparece en la línea de "
+                "comandos ni en «Comando Docker». Son claves globales; los "
+                "contenedores existentes necesitan «Guardar y recrear "
+                "contenedor».",
                 classes="hint",
                 markup=False,
             )
-            with Vertical(id="go-status-box"):
-                yield Label("OpenCode Go", classes="section-title")
-                yield Static("", id="go-status", markup=False)
             yield Static(
-                "Los modelos se usan con el prefijo opencode-go/<modelo>.",
+                "Selecciona un proveedor para configurar o borrar su clave.",
                 classes="hint",
                 markup=False,
             )
-            yield Input(
-                value="",
-                placeholder="Introduce la API key de OpenCode Go",
-                password=True,
-                id="go-key",
-            )
-            with Horizontal():
-                yield Button("Guardar", id="go-save", variant="success")
-                yield Button("Borrar", id="go-clear", variant="warning")
+            yield ListView(id="providers-list")
         yield Footer()
 
-    def on_mount(self) -> None:
-        self.refresh_status()
+    async def on_mount(self) -> None:
+        await self.refresh_status()
 
-    def refresh_status(self) -> None:
-        status = self.query_one("#go-status", Static)
-        if not providers.go_key_configured(self.app.paths):
-            status.update("Clave no configurada.")
-            return
-        last4 = providers.go_key_last4(self.app.paths)
-        suffix = f" (…{last4})" if last4 else ""
-        status.update(f"Clave configurada{suffix}.")
-
-    @on(Button.Pressed, "#go-save")
-    async def save(self) -> None:
-        value = self.query_one("#go-key", Input).value
-        try:
-            providers.save_go_key(self.app.paths, value)
-        except ValueError as exc:
-            self.app.push_screen(MessageScreen("Error", str(exc)))
-            return
-        except OSError as exc:
-            self.app.push_screen(
-                MessageScreen("Error", f"No se pudo guardar la clave: {exc}")
+    async def refresh_status(self) -> None:
+        view = self.query_one("#providers-list", ListView)
+        await view.clear()
+        for entry in providers.PROVIDERS.values():
+            if providers.key_configured(self.app.paths, entry.id):
+                last4 = providers.key_last4(self.app.paths, entry.id)
+                suffix = f" (…{last4})" if last4 else ""
+                status = f"configurada{suffix}"
+            else:
+                status = "no configurada"
+            view.append(
+                ListItem(
+                    Label(f"{entry.name} · {status}", markup=False),
+                    id=entry.id,
+                )
             )
-            return
-        self.query_one("#go-key", Input).value = ""
-        self.refresh_status()
-        await self.report_stale("Clave guardada")
 
-    @on(Input.Submitted, "#go-key")
-    async def submit(self) -> None:
-        await self.save()
-
-    @on(Button.Pressed, "#go-clear")
-    async def clear(self) -> None:
-        try:
-            providers.clear_go_key(self.app.paths)
-        except OSError as exc:
+    @on(ListView.Selected, "#providers-list")
+    def provider_selected(self, event: ListView.Selected) -> None:
+        if event.item.id:
             self.app.push_screen(
-                MessageScreen("Error", f"No se pudo borrar la clave: {exc}")
+                ProviderKeyScreen(event.item.id),
+                self.provider_closed,
             )
+
+    def provider_closed(self, action: str | None) -> None:
+        if action is None:
             return
-        self.query_one("#go-key", Input).value = ""
-        self.refresh_status()
-        await self.report_stale("Clave borrada")
+        self.run_worker(self.finish_provider_change(action))
+
+    async def finish_provider_change(self, action: str) -> None:
+        await self.refresh_status()
+        await self.report_stale(action)
 
     async def report_stale(self, action: str) -> None:
         names: list[str] = []
@@ -1222,7 +1285,7 @@ class ProveedoresScreen(Screen):
                 if not exists:
                     continue
                 stale = await asyncio.to_thread(
-                    opencode_go_stale,
+                    stale_providers,
                     self.app.global_cfg,
                     self.app.paths,
                     project.container_name,
@@ -1231,7 +1294,12 @@ class ProveedoresScreen(Screen):
                 unknown = True
                 continue
             if stale:
-                names.append(f"- {project.name} / {project.branch}")
+                affected = ", ".join(
+                    providers.PROVIDERS[provider_id].name for provider_id in stale
+                )
+                names.append(
+                    f"- {project.name} / {project.branch} ({affected})"
+                )
 
         if names:
             message = (
@@ -1410,7 +1478,7 @@ class ProjectScreen(Screen):
             return
         try:
             stale = await asyncio.to_thread(
-                opencode_go_stale,
+                stale_providers,
                 self.app.global_cfg,
                 self.app.paths,
                 self.project().container_name,
@@ -1418,9 +1486,17 @@ class ProjectScreen(Screen):
         except Exception:
             return
         if stale:
+            affected = ", ".join(
+                providers.PROVIDERS[provider_id].name for provider_id in stale
+            )
+            if len(stale) == 1:
+                subject = f"Clave de {affected} desactualizada"
+            else:
+                subject = f"Claves de {affected} desactualizadas"
             notice.update(
-                "Clave de OpenCode Go desactualizada en este contenedor. "
-                "Usa «Guardar y recrear contenedor» en Ajustes."
+                subject
+                + " en este contenedor. Usa «Guardar y recrear contenedor» "
+                "en Ajustes."
             )
 
 

@@ -265,6 +265,7 @@ La configuración activa vive fuera de la working copy:
 | `config\opencode.jsonc` | Configuración global de OpenCode. |
 | `config\skills\` | Skills globales de OpenCode (`<id>\SKILL.md`). |
 | `config\secrets\opencode-go.env` | Clave de API de OpenCode Go (texto plano). |
+| `config\secrets\openai.env` | Clave de API de OpenAI (texto plano). |
 | `projects\<Proyecto-Rama>\project.json` | Identidad, working copy y ajustes de la instancia. |
 | `projects\<Proyecto-Rama>\AGENTS.md` | Instrucciones específicas del proyecto. |
 | `projects\<Proyecto-Rama>\opencode.jsonc` | Configuración específica de OpenCode. |
@@ -314,30 +315,35 @@ de `config\` y `projects\`, no las plantillas.
 
 ### Proveedores
 
-El menú **Proveedores** permite guardar la clave de API de OpenCode Go sin
-ejecutar `/connect` dentro de cada contenedor. La clave se almacena en
-`config\secrets\opencode-go.env` (texto plano) y se inyecta en los contenedores
-nuevos mediante `--env-file`; no se escribe en `config.json`, en
-`opencode.jsonc` ni en `auth.json`, y no aparece en la línea de comandos ni en
-**Comando Docker**.
+El menú **Proveedores** lista los proveedores disponibles y permite guardar la
+clave de API de cada uno sin ejecutar `/connect` dentro de cada contenedor.
+Al seleccionar un proveedor se abre un diálogo para introducir, guardar o
+borrar su clave. Cada clave se almacena en su propio fichero de
+`config\secrets\` (texto plano) y se inyecta en los contenedores nuevos
+mediante `--env-file`; no se escribe en `config.json`, en `opencode.jsonc` ni
+en `auth.json`, y no aparece en la línea de comandos ni en **Comando Docker**.
 
-Los modelos se eligen con el prefijo `opencode-go/<modelo>` (por ejemplo,
-`opencode-go/claude-haiku-5-5`). La misma clave cubre OpenCode Zen
-(`opencode/<modelo>`); el prefijo del modelo decide cuál se factura.
+| Proveedor | Fichero | Variable | Prefijo de modelo |
+| --- | --- | --- | --- |
+| OpenCode Go | `config\secrets\opencode-go.env` | `OPENCODE_API_KEY` | `opencode-go/<modelo>` |
+| OpenAI | `config\secrets\openai.env` | `OPENAI_API_KEY` | `openai/<modelo>` |
 
-Es una única clave global: todas las instancias la comparten y no se admiten
-claves distintas por instancia. Los contenedores existentes conservan la
-configuración con la que se crearon; tras guardar, cambiar o borrar la clave,
-cada instancia afectada muestra un aviso y necesita **Guardar y recrear
+La clave de OpenCode Go cubre también OpenCode Zen (`opencode/<modelo>`); el
+prefijo del modelo decide cuál se factura.
+
+Las claves son globales: todas las instancias comparten las mismas y no se
+admiten claves distintas por instancia. Los contenedores existentes conservan
+la configuración con la que se crearon; tras guardar, cambiar o borrar una
+clave, cada instancia afectada muestra un aviso y necesita **Guardar y recrear
 contenedor** desde sus Ajustes. ocode nunca recrea contenedores automáticamente.
 
-La clave se guarda en texto plano: cualquier persona con acceso al perfil de
-Windows del usuario puede leer el fichero. El agente que se ejecuta dentro del
+Las claves se guardan en texto plano: cualquier persona con acceso al perfil de
+Windows del usuario puede leer los ficheros. El agente que se ejecuta dentro del
 contenedor puede leer su propio entorno (`env`) y `docker inspect` muestra las
-variables; `sensitive-paths.txt` no protege frente a eso. Usa una clave
-dedicada y revocable, y no la reutilices para otros servicios. ocode nunca
-muestra el valor completo: solo el estado (configurada o no) y, como máximo,
-los últimos cuatro caracteres.
+variables; `sensitive-paths.txt` no protege frente a eso. Usa claves dedicadas
+y revocables, y no las reutilices para otros servicios. ocode nunca muestra el
+valor completo: solo el estado (configurada o no) y, como máximo, los últimos
+cuatro caracteres.
 
 ## Protección de archivos
 
