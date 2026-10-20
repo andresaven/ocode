@@ -230,7 +230,7 @@ class UpdateTuiTests(unittest.IsolatedAsyncioTestCase):
                  patch.object(app, "exit") as exit_app:
                 async with app.run_test() as pilot:
                     app.perform_update(release)
-                    self.assertTrue(await self.wait_for(pilot, exit_app.called))
+                    self.assertTrue(await self.wait_for(pilot, lambda: exit_app.called))
             stage.assert_called_once_with(release, home)
             startfile.assert_called_once_with(launcher)
             exit_app.assert_called_once_with()
