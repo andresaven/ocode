@@ -1,5 +1,15 @@
 # Cambios
 
+## 0.9.0
+
+- Varios proveedores de claves, OpenCode Go y OpenAI, cada uno con su fichero
+  en `config\secrets` y su etiqueta en el contenedor.
+- La pantalla Proveedores lista el estado de cada clave y abre un diálogo para
+  guardar o borrar la clave del proveedor seleccionado.
+- Las instancias reciben solo las claves configuradas mediante `--env-file` y
+  avisan de que deben recrearse cuando una clave cambia o se borra.
+- `ocode doctor` muestra el estado de cada proveedor.
+
 ## 0.8.0
 
 - La paleta `Ctrl+P` queda reservada para los atajos; las acciones pasan al

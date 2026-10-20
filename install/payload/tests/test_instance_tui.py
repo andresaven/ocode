@@ -311,6 +311,29 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
             mocks["stop_container"].assert_not_called()
             self.assertEqual(app.screen.title_text, "Instancia eliminada")
 
+    async def test_delete_instance_does_not_resume_deleted_project(self):
+        app = self.make_app()
+        mocks, _ = self.mock_launch(app)
+        project = app.store.get_project.return_value
+        mocks["container_running"].return_value = False
+        mocks["remove_state"].return_value = "Volúmenes eliminados"
+
+        def get_project(project_id):
+            if app.store.delete_project_config.called:
+                raise FileNotFoundError(project_id)
+            return project
+
+        app.store.get_project.side_effect = get_project
+        async with app.run_test(size=(100, 40)) as pilot:
+            app.open_project("demo")
+            await pilot.pause()
+            app.screen.delete_instance()
+            await pilot.pause()
+            await pilot.click("#yes")
+            await pilot.pause()
+            await pilot.pause()
+            self.assertEqual(app.screen.title_text, "Instancia eliminada")
+
     async def test_different_port_does_not_stop_other_instance(self):
         app = self.make_app()
         mocks, _ = self.mock_launch(app)

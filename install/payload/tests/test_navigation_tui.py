@@ -53,12 +53,17 @@ class NavigationTests(unittest.IsolatedAsyncioTestCase):
             app.push_screen(settings)
             await pilot.pause()
             commands = {command.title: command for command in app.get_system_commands(settings)}
-            self.assertIn("Atrás", commands)
+            self.assertTrue(any(title.startswith("Atrás") for title in commands))
             settings.back()
             await pilot.pause()
             self.assertIs(app.screen, main)
             commands = {command.title: command for command in app.get_system_commands(main)}
-            commands["Adelante"].callback()
+            forward = next(
+                (command for title, command in commands.items() if title.startswith("Adelante")),
+                None,
+            )
+            self.assertIsNotNone(forward)
+            forward.callback()
             await pilot.pause()
             self.assertIs(app.screen, settings)
 

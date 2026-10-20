@@ -32,6 +32,7 @@ from textual.widgets import (
 )
 
 from . import __version__
+from . import providers
 from .docker import (
     DockerError,
     build_launch_command,
@@ -53,6 +54,7 @@ from .docker import (
     remove_state,
     sensitive_applied_paths,
     sensitive_mount_report,
+    stale_providers,
     stop_container,
     validate_build_paths,
 )
@@ -1111,6 +1113,216 @@ class JavaScreen(Screen):
         self.app.action_navigation_back()
 
 
+class ProviderKeyScreen(ModalScreen[str | None]):
+    CSS = """
+    ProviderKeyScreen { align: center middle; }
+    #provider-key {
+        width: 72%;
+        height: auto;
+        border: round $primary;
+        padding: 1 2;
+        background: $surface;
+    }
+    #provider-status { margin-bottom: 1; }
+    #provider-input { margin-bottom: 1; }
+    #provider-actions { height: 3; }
+    #provider-actions Button { width: 1fr; margin-right: 1; }
+    """
+
+    def __init__(self, provider_id: str):
+        super().__init__()
+        self.provider = providers.provider(provider_id)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="provider-key"):
+            yield Label(self.provider.name, classes="title")
+            yield Static("", id="provider-status", markup=False)
+            yield Input(
+                value="",
+                placeholder=f"Introduce la API key de {self.provider.name}",
+                password=True,
+                id="provider-input",
+            )
+            with Horizontal(id="provider-actions"):
+                yield Button("Guardar", id="provider-save", variant="success")
+                if providers.key_configured(self.app.paths, self.provider.id):
+                    yield Button("Borrar", id="provider-clear", variant="warning")
+                yield Button("Cancelar", id="provider-cancel")
+
+    def on_mount(self) -> None:
+        self.refresh_status()
+        self.query_one("#provider-input", Input).focus()
+
+    def refresh_status(self) -> None:
+        status = self.query_one("#provider-status", Static)
+        if not providers.key_configured(self.app.paths, self.provider.id):
+            status.update("Clave no configurada.")
+            return
+        last4 = providers.key_last4(self.app.paths, self.provider.id)
+        suffix = f" (…{last4})" if last4 else ""
+        status.update(f"Clave configurada{suffix}.")
+
+    @on(Button.Pressed, "#provider-save")
+    async def save(self) -> None:
+        value = self.query_one("#provider-input", Input).value
+        try:
+            providers.save_key(self.app.paths, self.provider.id, value)
+        except ValueError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
+        except OSError as exc:
+            self.app.push_screen(
+                MessageScreen("Error", f"No se pudo guardar la clave: {exc}")
+            )
+            return
+        self.dismiss("Clave guardada")
+
+    @on(Input.Submitted, "#provider-input")
+    async def submit(self) -> None:
+        await self.save()
+
+    @on(Button.Pressed, "#provider-clear")
+    def clear(self) -> None:
+        try:
+            providers.clear_key(self.app.paths, self.provider.id)
+        except OSError as exc:
+            self.app.push_screen(
+                MessageScreen("Error", f"No se pudo borrar la clave: {exc}")
+            )
+            return
+        self.dismiss("Clave borrada")
+
+    @on(Button.Pressed, "#provider-cancel")
+    def cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ProveedoresScreen(Screen):
+    CSS = """
+    ProveedoresScreen { padding: 1 3; }
+    #proveedores-content { height: 1fr; }
+    .hint { color: $text-muted; margin-bottom: 1; }
+    #back { width: auto; margin-bottom: 1; }
+    #providers-list {
+        height: auto;
+        max-height: 12;
+        border: round $primary;
+        margin-bottom: 1;
+    }
+    #providers-list ListItem { padding: 0 1; }
+    .section-title { text-style: bold; margin-bottom: 1; }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Button("← Volver", id="back", variant="primary")
+        yield Label("Proveedores", classes="title")
+        with VerticalScroll(id="proveedores-content"):
+            yield Static(
+                "Cada clave se guarda en config\\secrets y se inyecta en los "
+                "contenedores con --env-file: no aparece en la línea de "
+                "comandos ni en «Comando Docker». Son claves globales; los "
+                "contenedores existentes necesitan «Guardar y recrear "
+                "contenedor».",
+                classes="hint",
+                markup=False,
+            )
+            yield Static(
+                "Selecciona un proveedor para configurar o borrar su clave.",
+                classes="hint",
+                markup=False,
+            )
+            yield ListView(id="providers-list")
+        yield Footer()
+
+    async def on_mount(self) -> None:
+        await self.refresh_status()
+
+    async def refresh_status(self) -> None:
+        view = self.query_one("#providers-list", ListView)
+        await view.clear()
+        for entry in providers.PROVIDERS.values():
+            if providers.key_configured(self.app.paths, entry.id):
+                last4 = providers.key_last4(self.app.paths, entry.id)
+                suffix = f" (…{last4})" if last4 else ""
+                status = f"configurada{suffix}"
+            else:
+                status = "no configurada"
+            view.append(
+                ListItem(
+                    Label(f"{entry.name} · {status}", markup=False),
+                    id=entry.id,
+                )
+            )
+
+    @on(ListView.Selected, "#providers-list")
+    def provider_selected(self, event: ListView.Selected) -> None:
+        if event.item.id:
+            self.app.push_screen(
+                ProviderKeyScreen(event.item.id),
+                self.provider_closed,
+            )
+
+    def provider_closed(self, action: str | None) -> None:
+        if action is None:
+            return
+        self.run_worker(self.finish_provider_change(action))
+
+    async def finish_provider_change(self, action: str) -> None:
+        await self.refresh_status()
+        await self.report_stale(action)
+
+    async def report_stale(self, action: str) -> None:
+        names: list[str] = []
+        unknown = False
+        for project in self.app.store.list_projects():
+            try:
+                exists = await asyncio.to_thread(
+                    container_exists,
+                    self.app.global_cfg,
+                    project.container_name,
+                )
+                if not exists:
+                    continue
+                stale = await asyncio.to_thread(
+                    stale_providers,
+                    self.app.global_cfg,
+                    self.app.paths,
+                    project.container_name,
+                )
+            except Exception:
+                unknown = True
+                continue
+            if stale:
+                affected = ", ".join(
+                    providers.PROVIDERS[provider_id].name for provider_id in stale
+                )
+                names.append(
+                    f"- {project.name} / {project.branch} ({affected})"
+                )
+
+        if names:
+            message = (
+                f"{action}. Instancias con contenedor desactualizado:\n"
+                + "\n".join(names)
+                + "\n\nAbre Ajustes en cada instancia y usa «Guardar y recrear "
+                "contenedor» para aplicar la clave. No se ha recreado nada "
+                "automáticamente."
+            )
+        elif unknown:
+            message = (
+                f"{action}. No se pudo comprobar si hay instancias "
+                "desactualizadas. Revisa el motor en Diagnóstico."
+            )
+        else:
+            message = f"{action}. No hay instancias que necesiten recreación."
+        self.app.push_screen(MessageScreen("Proveedores", message))
+
+    @on(Button.Pressed, "#back")
+    def back(self) -> None:
+        self.app.action_navigation_back()
+
+
 class ProjectScreen(Screen):
     CSS = """
     ProjectScreen { padding: 1 3; }
@@ -1136,6 +1348,7 @@ class ProjectScreen(Screen):
     .section-help { height: auto; margin-bottom: 1; }
     #danger-zone { border: round $error; }
     #instance-status { height: auto; margin-bottom: 1; }
+    #go-stale-notice { height: auto; margin-bottom: 1; color: $warning; }
     #navigation { height: auto; }
     #back { width: auto; margin-bottom: 1; }
     #top-actions { height: 3; align: right middle; }
@@ -1159,6 +1372,7 @@ class ProjectScreen(Screen):
         with VerticalScroll(id="instance-content"):
             yield Static(self._summary(), id="info", markup=False)
             yield Static("Estado: consultando...", id="instance-status", markup=False)
+            yield Static("", id="go-stale-notice", markup=False)
             with Vertical(classes="action-group"):
                 yield Label("Uso", classes="section-title")
                 yield Static(
@@ -1216,7 +1430,16 @@ class ProjectScreen(Screen):
             f"Reglas de protección: {len(p.sensitive_paths)}",
         ])
 
+    def _exists(self) -> bool:
+        try:
+            self.app.store.get_project(self.project_id)
+        except (OSError, ValueError):
+            return False
+        return True
+
     def on_screen_resume(self) -> None:
+        if not self._exists():
+            return
         self.query_one("#info", Static).update(self._summary())
         self.refresh_status()
 
@@ -1226,8 +1449,12 @@ class ProjectScreen(Screen):
 
     @work(exclusive=True)
     async def refresh_status(self) -> None:
+        if not self._exists():
+            return
         status_widget = self.query_one("#instance-status", Static)
+        notice = self.query_one("#go-stale-notice", Static)
         status_widget.update("Estado: consultando...")
+        notice.update("")
         try:
             status = await asyncio.to_thread(
                 container_status, self.app.global_cfg, self.project().container_name,
@@ -1245,6 +1472,32 @@ class ProjectScreen(Screen):
             status_widget.update(f"Estado: {label}")
         except Exception:
             status_widget.update("Estado: no disponible. Comprueba el motor en Diagnóstico.")
+            return
+
+        if status == "absent":
+            return
+        try:
+            stale = await asyncio.to_thread(
+                stale_providers,
+                self.app.global_cfg,
+                self.app.paths,
+                self.project().container_name,
+            )
+        except Exception:
+            return
+        if stale:
+            affected = ", ".join(
+                providers.PROVIDERS[provider_id].name for provider_id in stale
+            )
+            if len(stale) == 1:
+                subject = f"Clave de {affected} desactualizada"
+            else:
+                subject = f"Claves de {affected} desactualizadas"
+            notice.update(
+                subject
+                + " en este contenedor. Usa «Guardar y recrear contenedor» "
+                "en Ajustes."
+            )
 
 
     def _protection_notice(self, project: ProjectConfig) -> str:
@@ -1762,12 +2015,13 @@ class MainScreen(Screen):
     CSS = """
     MainScreen { padding: 1 3; }
     #projects { height: 1fr; border: round $primary; }
-    #toolbar {
-        height: 6;
-        grid-size: 3;
-        grid-columns: 1fr 1fr 1fr;
-        grid-rows: 3 3;
+    #toolbar { height: 6; }
+    #toolbar-primary {
+        height: 3;
+        grid-size: 4;
+        grid-columns: 1fr 1fr 1fr 1fr;
     }
+    #toolbar-secondary { height: 3; }
     #toolbar Button { width: 1fr; }
     #top-actions { height: 3; align: right middle; }
     #top-actions Button { width: auto; }
@@ -1796,13 +2050,16 @@ class MainScreen(Screen):
         table.cursor_type = "row"
         yield table
 
-        with Grid(id="toolbar"):
-            yield Button("Añadir", id="add", variant="success")
-            yield Button("Gestionar instancia", id="open", variant="primary")
-            yield Button("Java / Maven", id="java")
-            yield Button("Motor", id="container-runtime")
-            yield Button("Diagnóstico", id="doctor")
-            yield Button("Config global", id="global-config")
+        with Vertical(id="toolbar"):
+            with Grid(id="toolbar-primary"):
+                yield Button("Añadir", id="add", variant="success")
+                yield Button("Gestionar instancia", id="open", variant="primary")
+                yield Button("Java / Maven", id="java")
+                yield Button("Proveedores", id="providers")
+            with Horizontal(id="toolbar-secondary"):
+                yield Button("Motor", id="container-runtime")
+                yield Button("Diagnóstico", id="doctor")
+                yield Button("Config global", id="global-config")
         yield Footer()
 
     @on(Button.Pressed, "#options")
@@ -1882,6 +2139,10 @@ class MainScreen(Screen):
     @on(Button.Pressed, "#java")
     def java(self) -> None:
         self.app.push_screen(JavaScreen())
+
+    @on(Button.Pressed, "#providers")
+    def open_providers(self) -> None:
+        self.app.push_screen(ProveedoresScreen())
 
     @on(Button.Pressed, "#container-runtime")
     def container_runtime(self) -> None:

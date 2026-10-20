@@ -8,6 +8,7 @@ import time
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
+from . import providers
 from .model import GlobalConfig, MAVEN_VERSION, ProjectConfig, normalize_build_path
 from .paths import Paths
 
@@ -464,6 +465,18 @@ def build_run_command(
     args.append("-d")
     args.extend(["--name", project.container_name])
     args.extend(["--label", "io.ocode.mode=shared"])
+
+    # Las claves de proveedores viajan en ficheros de entorno: nunca en argv.
+    for provider in providers.PROVIDERS.values():
+        if not providers.key_configured(paths, provider.id):
+            continue
+        args.extend(
+            ["--env-file", engine.host_path(providers.env_file(paths, provider.id))]
+        )
+        fingerprint = providers.key_fingerprint(paths, provider.id)
+        if fingerprint:
+            args.extend(["--label", f"{provider.label}={fingerprint}"])
+
     args.extend(["--workdir", "/workspace"])
 
     if global_cfg.security_no_new_privileges:
@@ -791,6 +804,32 @@ def container_status(cfg: GlobalConfig, name: str) -> str:
     except (OSError, subprocess.SubprocessError) as exc:
         raise DockerError("No se pudo consultar el estado de la instancia.") from exc
     return cp.stdout.strip() or "absent"
+
+
+def stale_providers(cfg: GlobalConfig, paths: Paths, name: str) -> list[str]:
+    """Ids de proveedores cuya etiqueta no coincide con la clave configurada.
+
+    Compara solo etiquetas; nunca inspecciona el entorno del contenedor.
+    """
+    engine = resolve_engine(cfg)
+    cp = run_capture(
+        engine,
+        ["inspect", name, "--format", "{{json .Config.Labels}}"],
+    )
+    try:
+        labels = json.loads(cp.stdout or "null") or {}
+    except json.JSONDecodeError as exc:
+        raise DockerError("No se pudieron leer las etiquetas del contenedor.") from exc
+    if not isinstance(labels, dict):
+        labels = {}
+
+    stale = []
+    for provider in providers.PROVIDERS.values():
+        expected = providers.key_fingerprint(paths, provider.id) or ""
+        actual = labels.get(provider.label) or ""
+        if actual != expected:
+            stale.append(provider.id)
+    return stale
 
 
 def container_published_ports(cfg: GlobalConfig, name: str) -> set[int]:

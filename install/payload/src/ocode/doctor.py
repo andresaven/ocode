@@ -1,4 +1,5 @@
 from pathlib import Path
+from . import providers
 from .docker import docker_available, image_exists
 
 
@@ -16,6 +17,17 @@ def doctor(paths, cfg, projects):
         ("✓" if paths.opencode_config.exists() else "✗")
         + f" OpenCode config: {paths.opencode_config}"
     )
+    for provider in providers.PROVIDERS.values():
+        if providers.key_configured(paths, provider.id):
+            last4 = providers.key_last4(paths, provider.id)
+            suffix = f" (…{last4})" if last4 else ""
+            lines.append(
+                f"✓ Clave {provider.name}: configurada{suffix} · fichero legible"
+            )
+        elif providers.env_file(paths, provider.id).exists():
+            lines.append(f"✗ Clave {provider.name}: fichero ilegible o no válido")
+        else:
+            lines.append(f"• Clave {provider.name}: no configurada")
 
     for name, runtime in cfg.runtimes.items():
         exists = image_exists(cfg, runtime.image)

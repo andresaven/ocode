@@ -1,6 +1,9 @@
 # Instrucciones locales para agentes; no ignorar las plantillas distribuidas.
 /AGENTS.md
 
+# Credenciales locales de OpenCode Go.
+/config/secrets/
+
 # Byte-compiled / optimised / DLL files
 __pycache__/
 *.py[cod]
