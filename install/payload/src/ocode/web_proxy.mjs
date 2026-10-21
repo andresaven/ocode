@@ -16,6 +16,13 @@ const backendUsername = process.env.OPENCODE_SERVER_USERNAME || "opencode";
 const cookieName = `ocode_autologin_${publicPort}`;
 const controlPath = process.env.OCODE_CONTROL_PATH || "/tmp/ocode-web-control.sock";
 const pendingLogins = new Map();
+const webShowAgent = process.env.OCODE_WEB_SHOW_AGENT;
+const webColorScheme = process.env.OCODE_WEB_COLOR_SCHEME;
+const webPreferences = (webShowAgent === "true" || webShowAgent === "false") &&
+  (webColorScheme === "dark" || webColorScheme === "light")
+  ? { showAgent: webShowAgent === "true", colorScheme: webColorScheme }
+  : null;
+const preferencesPage = "/_ocode/web-preferences";
 
 if (!webToken) {
   console.error("[ocode-proxy] missing OCODE_WEB_TOKEN");
@@ -153,7 +160,7 @@ function authorizeBrowser(req, res) {
   if (!loginPage && cookies[cookieName] === webToken) {
     if (verifyLogin) {
       res.writeHead(302, {
-        location: "/",
+        location: webPreferences ? preferencesPage : "/",
         "cache-control": "no-store",
         "referrer-policy": "no-referrer",
       });
@@ -177,6 +184,50 @@ function authorizeBrowser(req, res) {
         "Pulsa Abrir Web de nuevo en ocode."
       : "OpenCode Web: abre esta instancia desde ocode.");
   return false;
+}
+
+function serveWebPreferences(req, res) {
+  if (!webPreferences || ![preferencesPage, `${preferencesPage}.js`].includes(
+    new URL(req.url, "http://localhost").pathname
+  )) return false;
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+
+  const script = `
+try {
+  const settingsKey = "settings.v3";
+  const raw = localStorage.getItem(settingsKey);
+  if (raw === null) {
+    localStorage.setItem(settingsKey, JSON.stringify({ general: { showCustomAgents: ${webPreferences.showAgent} } }));
+  } else {
+    try {
+      const settings = JSON.parse(raw);
+      if (settings && typeof settings === "object" && !Array.isArray(settings) &&
+          (settings.general === undefined ||
+           (settings.general && typeof settings.general === "object" && !Array.isArray(settings.general))) &&
+          settings.general?.showCustomAgents === undefined) {
+        settings.general ??= {};
+        settings.general.showCustomAgents = ${webPreferences.showAgent};
+        localStorage.setItem(settingsKey, JSON.stringify(settings));
+      }
+    } catch { /* Preserve invalid or unavailable browser data. */ }
+  }
+  if (localStorage.getItem("opencode-color-scheme") === null) {
+    localStorage.setItem("opencode-color-scheme", ${JSON.stringify(webPreferences.colorScheme)});
+  }
+} catch { /* Browser storage may be unavailable; still open the Web UI. */ }
+finally { location.replace("/"); }
+`;
+  const isScript = new URL(req.url, "http://localhost").pathname.endsWith(".js");
+  res.writeHead(200, {
+    "content-type": isScript ? "application/javascript; charset=utf-8" : "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; script-src 'self'; base-uri 'none'",
+  });
+  res.end(req.method === "HEAD" ? undefined : isScript ? script :
+    `<!doctype html><html><head><meta charset="utf-8"><script src="${preferencesPage}.js"></script></head><body></body></html>`);
+  return true;
 }
 
 function backendHeaders(headers) {
@@ -230,6 +281,7 @@ self.addEventListener("activate", event => {
 function proxyHttp(req, res) {
   if (retireServiceWorker(req, res)) return;
   if (!authorizeBrowser(req, res)) return;
+  if (serveWebPreferences(req, res)) return;
 
   const documentRequest = req.headers["sec-fetch-dest"] === "document" ||
     (req.headers.accept || "").includes("text/html");

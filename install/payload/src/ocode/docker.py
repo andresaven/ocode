@@ -591,6 +591,17 @@ def build_run_command(
         server_password = secrets.token_urlsafe(32)
         backend_port = 4097 if project.port != 4097 else 4098
 
+        if project.web_initial_preferences is not None:
+            preferences = project.web_initial_preferences
+            show_agent = preferences.get("show_agent")
+            color_scheme = preferences.get("color_scheme")
+            if type(show_agent) is not bool or color_scheme not in ("light", "dark"):
+                raise DockerError("Preferencias Web iniciales no válidas")
+            args.extend([
+                "-e", f"OCODE_WEB_SHOW_AGENT={str(show_agent).lower()}",
+                "-e", f"OCODE_WEB_COLOR_SCHEME={color_scheme}",
+            ])
+
         args.extend(
             [
                 "-p",

@@ -60,7 +60,7 @@ from .docker import (
 )
 from .doctor import doctor
 from .storage import container_directories, storage_report
-from .model import ProjectConfig, format_build_paths, parse_build_paths
+from .model import ProjectConfig, format_build_paths, parse_build_paths, next_project_port, projects_on_port
 from .paths import Paths
 from .store import Store
 from .update import Release, check_for_update, stage_update
@@ -347,6 +347,12 @@ class AddProjectScreen(Screen):
 
     def compose(self) -> ComposeResult:
         cfg = self.app.global_cfg
+        try:
+            suggested_port = next_project_port(cfg.default_port, self.app.store.list_projects())
+            port_notice = ""
+        except ValueError as exc:
+            suggested_port = cfg.default_port
+            port_notice = str(exc)
         java_options = [
             (f"Java {profile.java}", name)
             for name, profile in cfg.runtimes.items()
@@ -399,11 +405,12 @@ class AddProjectScreen(Screen):
 
             yield Label("Puerto web")
             yield Input(
-                value=str(cfg.default_port),
+                value=str(suggested_port),
                 type="integer",
                 id="port",
                 classes="field",
             )
+            yield Static(port_notice, id="port-notice", classes="hint")
 
         with Horizontal(id="buttons"):
             yield Button("Guardar", id="save", variant="success")
@@ -444,6 +451,22 @@ class AddProjectScreen(Screen):
     def cancel(self) -> None:
         self.app.pop_screen()
 
+    @on(Input.Changed, "#port")
+    def port_changed(self, event: Input.Changed) -> None:
+        try:
+            port = int(event.value)
+        except ValueError:
+            self.query_one("#port-notice", Static).update("")
+            return
+        owners = projects_on_port(self.app.store.list_projects(), port)
+        notice = (
+            f"Aviso: el puerto {port} ya está asociado a "
+            + ", ".join(f"{owner.name} / {owner.branch}" for owner in owners)
+            + ". Elige otro puerto."
+            if owners else ""
+        )
+        self.query_one("#port-notice", Static).update(notice)
+
     @on(Button.Pressed, "#save")
     def save(self) -> None:
         workspace = self.query_one("#workspace", Input).value.strip()
@@ -467,8 +490,19 @@ class AddProjectScreen(Screen):
 
         try:
             port = int(port_text)
+            if not 1 <= port <= 65535:
+                raise ValueError
         except ValueError:
-            self.app.push_screen(MessageScreen("Error", "Puerto no válido."))
+            self.app.push_screen(MessageScreen("Error", "Puerto no válido (1–65535)."))
+            return
+
+        owners = projects_on_port(self.app.store.list_projects(), port)
+        if owners:
+            names = ", ".join(f"{owner.name} / {owner.branch}" for owner in owners)
+            self.app.push_screen(MessageScreen(
+                "Puerto ya asociado",
+                f"El puerto {port} ya está asociado a {names}. Elige otro puerto.",
+            ))
             return
 
         try:
@@ -486,16 +520,20 @@ class AddProjectScreen(Screen):
             self.app.push_screen(MessageScreen("Error", str(exc)))
             return
 
-        project = self.app.store.create_project(
-            name=name,
-            branch=branch,
-            workspace=workspace,
-            runtime=runtime,
-            default_mode=mode,
-            port=port,
-            maven_repository=maven_repository,
-            build_paths=build_paths,
-        )
+        try:
+            project = self.app.store.create_project(
+                name=name,
+                branch=branch,
+                workspace=workspace,
+                runtime=runtime,
+                default_mode=mode,
+                port=port,
+                maven_repository=maven_repository,
+                build_paths=build_paths,
+            )
+        except ValueError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
         self.app.pop_screen()
         self.app.open_project(project.project_id)
 
@@ -848,6 +886,16 @@ class ProjectSettingsScreen(SaveRecreateScreen):
                 raise ValueError
         except ValueError:
             self.app.push_screen(MessageScreen("Error", "Puerto no válido (1–65535)."))
+            return
+        owners = projects_on_port(
+            self.app.store.list_projects(), p.port, exclude_id=p.project_id,
+        )
+        if owners:
+            names = ", ".join(f"{owner.name} / {owner.branch}" for owner in owners)
+            self.app.push_screen(MessageScreen(
+                "Puerto ya asociado",
+                f"El puerto {p.port} ya está asociado a {names}. Elige otro puerto.",
+            ))
             return
         p.project_agents_enabled = self.query_one("#agents_enabled", Switch).value
         p.project_config_enabled = self.query_one("#config_enabled", Switch).value
@@ -1524,6 +1572,17 @@ class ProjectScreen(Screen):
                 self.app.global_cfg,
                 p.container_name,
             )
+
+            if not existing:
+                projects = await asyncio.to_thread(self.app.store.list_projects)
+                owners = projects_on_port(projects, p.port, exclude_id=p.project_id)
+                if owners:
+                    names = ", ".join(f"{other.name} / {other.branch}" for other in owners)
+                    raise DockerError(
+                        f"El puerto {p.port} ya está asociado a {names}. "
+                        "Elige un puerto distinto en Ajustes antes de iniciar esta instancia. "
+                        "No se ha modificado ninguna otra instancia."
+                    )
 
             profile = self.app.global_cfg.runtimes.get(p.runtime)
             if profile is None:

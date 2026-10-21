@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ocode"
-version = "0.9.0"
+version = "0.10.0"
 description = "TUI para gestionar instancias Docker de OpenCode por proyecto"
 requires-python = ">=3.11"
 dependencies = [

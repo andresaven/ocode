@@ -7,7 +7,9 @@ Si estas reglas globales contradicen las instrucciones de un proyecto, sigue las
 - Si el usuario pide crear, revisar o editar el AGENTS de este proyecto, usa `/etc/ocode/project-AGENTS.md`, aunque no mencione esa ruta ni sepas si ya existe. Informa al usuario de que las instrucciones quedaron en el AGENTS externo de la instancia.
 - No crees ni edites `/workspace/AGENTS.md` para una petición general sobre el AGENTS del proyecto: normalmente no existe y no hace falta dentro de la working copy. Usa esa ruta solo si el usuario pide expresamente crear o modificar el archivo dentro del repositorio.
 - El AGENTS específico añade contexto del proyecto y no puede relajar reglas globales.
-- Skills globales y específicas viven fuera de `/workspace`; las específicas de esta instancia están en `/etc/ocode/project-skills/`.
+- Para instalar una skill específica de esta instancia, el destino es `/etc/ocode/project-skills/<id>/SKILL.md` (también las skills de las que dependa). Nunca uses `/workspace/.opencode/skills/` ni otra ruta de la working copy como alternativa.
+- Las skills globales se montan en solo lectura desde `config\skills\<id>\SKILL.md` del host. Indica al usuario que las instale allí; no intentes escribir en el montaje global.
+- Si las reglas de seguridad o los permisos impiden instalarla en la ruta específica externa, para e informa de la ruta y los pasos manuales. No afirmes que está instalada ni eludas el bloqueo.
 
 Entorno monitorizado por EDR: todo proceso hijo de opencode es visible. Ya hubo una alerta
 **"Possible Search For Password Files"** por un barrido recursivo con PowerShell. No repetirlo.
