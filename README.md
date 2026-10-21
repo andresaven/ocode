@@ -119,6 +119,8 @@ Al añadir una instancia, ocode consulta los puertos publicados por todos los
 contenedores del motor configurado, incluidos los detenidos, y propone el
 primer puerto libre desde el predeterminado. Las instancias guardadas en
 ocode sin contenedor no reservan puerto; los contenedores ajenos a ocode sí.
+El campo Puerto y el botón Guardar permanecen deshabilitados mientras se
+consulta el motor.
 Puedes editar la propuesta, pero un puerto asociado a un contenedor se señala
 y no permite guardar la instancia, tampoco desde Ajustes. Si el motor no
 responde, ocode no supone que los puertos están libres. El arranque no cambia

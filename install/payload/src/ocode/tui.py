@@ -350,6 +350,7 @@ class AddProjectScreen(Screen):
         cfg = self.app.global_cfg
         self.port_owners: dict[int, list[str]] = {}
         self.port_error = "Consultando puertos del motor de contenedores…"
+        self.port_ready = False
         java_options = [
             (f"Java {profile.java}", name)
             for name, profile in cfg.runtimes.items()
@@ -406,11 +407,12 @@ class AddProjectScreen(Screen):
                 type="integer",
                 id="port",
                 classes="field",
+                disabled=True,
             )
             yield Static(self.port_error, id="port-notice", classes="hint")
 
         with Horizontal(id="buttons"):
-            yield Button("Guardar", id="save", variant="success")
+            yield Button("Guardar", id="save", variant="success", disabled=True)
             yield Button("Cancelar", id="cancel")
         yield Footer()
 
@@ -428,11 +430,16 @@ class AddProjectScreen(Screen):
             self.port_error = str(exc)
             self.query_one("#port-notice", Static).update(self.port_error)
             return
-        self.port_owners = owners
-        self.port_error = ""
-        if port_input.value == original:
-            port_input.value = str(suggested)
-        self.show_port_notice(port_input.value)
+        else:
+            self.port_owners = owners
+            self.port_error = ""
+            if port_input.value == original:
+                port_input.value = str(suggested)
+            self.show_port_notice(port_input.value)
+        finally:
+            port_input.disabled = False
+            self.query_one("#save", Button).disabled = False
+            self.port_ready = True
 
     def show_port_notice(self, value: str) -> None:
         try:
@@ -487,6 +494,13 @@ class AddProjectScreen(Screen):
 
     @on(Button.Pressed, "#save")
     async def save(self) -> None:
+        if not self.port_ready:
+            self.app.push_screen(MessageScreen(
+                "Consulta en curso",
+                "Espera a que termine la consulta de puertos del motor de contenedores.",
+            ))
+            return
+
         workspace = self.query_one("#workspace", Input).value.strip()
         name = self.query_one("#name", Input).value.strip()
         branch = self.query_one("#branch", Input).value.strip()

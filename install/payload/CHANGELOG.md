@@ -8,7 +8,8 @@
   las instancias previas no reciben estos valores iniciales.
 - Al crear instancias se consulta el motor de contenedores y se propone el
   primer puerto libre desde el predeterminado; se avisa si pertenece a
-  cualquier contenedor, esté o no gestionado por ocode.
+  cualquier contenedor, esté o no gestionado por ocode. El campo Puerto no
+  admite edición y la instancia no se puede guardar mientras dura la consulta.
 - Las instrucciones de las instancias indican que las skills específicas se
   instalan fuera de la working copy; las globales se instalan desde el host
   porque su montaje es de solo lectura.

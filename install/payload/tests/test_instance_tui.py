@@ -627,6 +627,64 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             await app.screen.workers.wait_for_complete()
             self.assertEqual(app.screen.query_one("#port", Input).value, "4097")
+            self.assertFalse(app.screen.query_one("#port", Input).disabled)
+
+    async def test_add_project_disables_port_while_query_is_pending(self):
+        app = self.make_app()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        real_to_thread = asyncio.to_thread
+
+        async def delayed(func, *args, **kwargs):
+            if func is self.port_owners_mock:
+                started.set()
+                await release.wait()
+                return {4096: ["contenedor-externo"]}
+            return await real_to_thread(func, *args, **kwargs)
+
+        async with app.run_test(size=(100, 40)) as pilot:
+            with patch("ocode.tui.asyncio.to_thread", side_effect=delayed):
+                app.push_screen(AddProjectScreen())
+                await started.wait()
+                screen = app.screen
+                port_input = screen.query_one("#port", Input)
+                self.assertTrue(port_input.disabled)
+                self.assertTrue(screen.query_one("#save", Button).disabled)
+                self.assertEqual(port_input.value, "4096")
+                release.set()
+                await screen.workers.wait_for_complete()
+                self.assertFalse(port_input.disabled)
+                self.assertFalse(screen.query_one("#save", Button).disabled)
+                self.assertEqual(port_input.value, "4097")
+
+    async def test_add_project_does_not_save_while_port_query_is_pending(self):
+        from tempfile import TemporaryDirectory
+
+        app = self.make_app()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        real_to_thread = asyncio.to_thread
+
+        async def delayed(func, *args, **kwargs):
+            if func is self.port_owners_mock:
+                started.set()
+                await release.wait()
+                return {}
+            return await real_to_thread(func, *args, **kwargs)
+
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            async with app.run_test(size=(100, 40)) as pilot:
+                with patch("ocode.tui.asyncio.to_thread", side_effect=delayed):
+                    app.push_screen(AddProjectScreen())
+                    await started.wait()
+                    screen = app.screen
+                    screen.query_one("#workspace", Input).value = directory
+                    await screen.save()
+                    app.store.create_project.assert_not_called()
+                    self.assertIsInstance(app.screen, MessageScreen)
+                    app.pop_screen()
+                    release.set()
+                    await screen.workers.wait_for_complete()
 
     async def test_add_project_ignores_saved_instance_without_container(self):
         app = self.make_app()
@@ -647,6 +705,8 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 screen = app.screen
                 await screen.workers.wait_for_complete()
+                self.assertFalse(screen.query_one("#port", Input).disabled)
+                self.assertFalse(screen.query_one("#save", Button).disabled)
                 self.assertIn("Motor no disponible", str(screen.query_one("#port-notice", Static).render()))
                 screen.query_one("#workspace", Input).value = directory
                 await pilot.click("#save")
