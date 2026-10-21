@@ -577,6 +577,68 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
             self.assertLess(children.index(screen.query_one("#build").parent),
                             children.index(screen.query_one("#maven-section")))
 
+    async def test_add_project_suggests_first_unassigned_port(self):
+        app = self.make_app()
+        app.store.list_projects.return_value.append(
+            ProjectConfig("second", "Segundo", "main", ".", port=4098)
+        )
+        async with app.run_test(size=(100, 40)) as pilot:
+            app.push_screen(AddProjectScreen())
+            await pilot.pause()
+            self.assertEqual(app.screen.query_one("#port", Input).value, "4097")
+
+    async def test_add_project_warns_and_refuses_assigned_port(self):
+        from tempfile import TemporaryDirectory
+
+        app = self.make_app()
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(AddProjectScreen())
+                await pilot.pause()
+                screen = app.screen
+                screen.query_one("#workspace", Input).value = directory
+                screen.query_one("#port", Input).value = "4096"
+                await pilot.pause()
+                self.assertIn("Proyecto", str(screen.query_one("#port-notice", Static).render()))
+                await pilot.click("#save")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                self.assertIn("4096", app.screen.message)
+                app.store.create_project.assert_not_called()
+
+    async def test_settings_warns_when_port_belongs_to_another_instance(self):
+        app = self.make_app()
+        app.store.list_projects.return_value.append(
+            ProjectConfig("other", "Otro", "main", ".", port=4321)
+        )
+        with patch("ocode.tui.recreate_container") as recreate:
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(ProjectSettingsScreen("demo"))
+                await pilot.pause()
+                app.screen.query_one("#port", Input).value = "4321"
+                await pilot.click("#save")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                self.assertIn("Otro", app.screen.message)
+                app.store.save_project.assert_not_called()
+                recreate.assert_not_called()
+
+    async def test_open_new_instance_warns_about_port_assigned_to_stopped_instance(self):
+        app = self.make_app()
+        mocks, other = self.mock_launch(app)
+        app.store.get_project.return_value.port = other.port
+        with patch.object(app, "exit") as exit_app:
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.open_project("demo")
+                await pilot.pause()
+                await app.screen.launch("serve")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                self.assertIn("ya está asociado", app.screen.message)
+                mocks["launch_detached"].assert_not_called()
+                mocks["stop_container"].assert_not_called()
+                exit_app.assert_not_called()
+
     async def test_add_project_validates_and_forwards_build_paths(self):
         from tempfile import TemporaryDirectory
 

@@ -285,3 +285,18 @@ class ProjectConfig:
             result.append((path, name))
 
         return result
+
+
+def projects_on_port(projects: list[ProjectConfig], port: int, *, exclude_id: str | None = None) -> list[ProjectConfig]:
+    return [project for project in projects
+            if project.port == port and project.project_id != exclude_id]
+
+
+def next_project_port(default_port: int, projects: list[ProjectConfig]) -> int:
+    if not 1 <= default_port <= 65535:
+        raise ValueError("Puerto predeterminado no válido (1–65535).")
+    assigned = {project.port for project in projects}
+    for port in range(default_port, 65536):
+        if port not in assigned:
+            return port
+    raise ValueError("No quedan puertos disponibles desde el puerto predeterminado.")

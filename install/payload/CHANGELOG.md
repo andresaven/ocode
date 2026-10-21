@@ -6,6 +6,8 @@
   Mostrar agente activado y esquema oscuro, configurables globalmente.
 - Al abrir la Web se respetan las preferencias existentes del navegador;
   las instancias previas no reciben estos valores iniciales.
+- Al crear instancias se propone el primer puerto sin asignar desde el
+  predeterminado; se avisa y se impide usar uno ya asociado a otra instancia.
 
 ## 0.9.0
 

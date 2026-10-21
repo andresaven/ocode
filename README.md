@@ -115,6 +115,12 @@ originales del host**, salvo las rutas enmascaradas por la protección.
 Cada instancia publica su puerto Web. Utiliza puertos distintos para
 instancias que deban funcionar al mismo tiempo. El puerto predeterminado
 es `4096` y la dirección de escucha en el host es `127.0.0.1`.
+Al añadir una instancia, ocode propone el primer puerto sin asignar desde
+el predeterminado, contando también las instancias detenidas. Puedes editar
+la propuesta, pero un puerto ya asociado a otra instancia se señala y no
+permite guardar la nueva. Si un proceso ajeno a ocode ocupa el puerto, el
+arranque falla sin cambiar automáticamente de puerto ni afectar a otras
+instancias.
 
 ## Gestionar instancias
 
