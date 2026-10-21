@@ -26,6 +26,10 @@ test("effective instructions preserve global and project rules without editing s
   assert.ok(effective.startsWith("Global guidance\n\nProject guidance\n\n"));
   assert.match(effective, /globales prevalecen/);
   assert.match(effective, /\/etc\/ocode\/project-AGENTS\.md/);
+  assert.match(effective, /\/etc\/ocode\/project-skills\/<id>\/SKILL\.md/);
+  assert.match(effective, /No instales skills en \/workspace ni en \.opencode\/skills del repositorio/);
+  assert.match(effective, /config\/skills\/<id>\/SKILL\.md del host/);
+  assert.match(effective, /informa al usuario de la ruta y los pasos manuales/);
   assert.equal(readFileSync(options.globalSource, "utf8"), "\uFEFFGlobal guidance");
   assert.equal(readFileSync(options.projectSource, "utf8"), "Project guidance");
 });
