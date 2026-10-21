@@ -118,9 +118,11 @@ es `4096` y la dirección de escucha en el host es `127.0.0.1`.
 Al añadir una instancia, ocode propone el primer puerto sin asignar desde
 el predeterminado, contando también las instancias detenidas. Puedes editar
 la propuesta, pero un puerto ya asociado a otra instancia se señala y no
-permite guardar la nueva. Si un proceso ajeno a ocode ocupa el puerto, el
-arranque falla sin cambiar automáticamente de puerto ni afectar a otras
-instancias.
+permite guardar la nueva. Tampoco se permite guardar ese puerto desde los
+Ajustes de otra instancia. Si una instancia ya configurada comparte puerto
+con otra, ocode avisa antes de crear su contenedor. Si un proceso ajeno a
+ocode ocupa el puerto, el arranque falla sin cambiar automáticamente de
+puerto ni afectar a otras instancias.
 
 ## Gestionar instancias
 
@@ -309,6 +311,15 @@ monta las skills de cada proyecto fuera de `/workspace` y las registra desde la
 configuración global, por lo que no dependen de activar el JSONC específico.
 Las skills generales son de solo lectura; las del proyecto y el AGENTS
 específico permiten escritura desde OpenCode.
+
+Para instalar una skill desde OpenCode en una instancia, utiliza
+`/etc/ocode/project-skills/<id>/SKILL.md` (también para sus dependencias).
+No la instales en `/workspace/.opencode/skills/` ni en otra ruta de la
+working copy. Las skills globales se instalan desde el host en
+`config\skills\<id>\SKILL.md`, ya que su montaje es de solo lectura dentro
+del contenedor. Si los permisos impiden escribir la skill específica, hay
+que instalarla manualmente en la carpeta de skills de esa instancia en el
+host; no se usa la working copy como alternativa.
 
 La configuración global de OpenCode también se monta en solo lectura.
 La específica, cuando está activada, se monta en `/opencode.jsonc`, fuera
