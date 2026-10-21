@@ -6,9 +6,9 @@
   Mostrar agente activado y esquema oscuro, configurables globalmente.
 - Al abrir la Web se respetan las preferencias existentes del navegador;
   las instancias previas no reciben estos valores iniciales.
-- Al crear instancias se propone el primer puerto sin asignar desde el
-  predeterminado; se avisa y se impide usar uno ya asociado a otra instancia,
-  también al guardar Ajustes o antes de crear un contenedor.
+- Al crear instancias se consulta el motor de contenedores y se propone el
+  primer puerto libre desde el predeterminado; se avisa si pertenece a
+  cualquier contenedor, esté o no gestionado por ocode.
 - Las instrucciones de las instancias indican que las skills específicas se
   instalan fuera de la working copy; las globales se instalan desde el host
   porque su montaje es de solo lectura.

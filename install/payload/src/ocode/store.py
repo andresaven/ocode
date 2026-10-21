@@ -6,7 +6,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from .model import GlobalConfig, ProjectConfig, SensitivePathsError, projects_on_port
+from .model import GlobalConfig, ProjectConfig, SensitivePathsError
 from .paths import Paths
 
 SENSITIVE_PERMISSION_PATTERNS = ['*src/main/resources/configuration/des*', '*src/main/resources/configuration/pre*', '*src/main/resources/configuration/prod*', '*src/main/resources/certs*', '*src/main/resources/application-desa.yaml*', '*src/main/resources/application-pre.yaml*', '*src/main/resources/application-pro.yaml*', '*src/main/resources/db/production*', '*src/main/resources/db/db.changelog-desa.yaml*', '*src/main/resources/db/db.changelog-pre.yaml*', '*src/main/resources/db/liquibase-desa.properties*', '*src/main/resources/db/liquibase-pre.properties*', '*k8s*']
@@ -449,8 +449,6 @@ class Store:
     ) -> ProjectConfig:
         if not 1 <= port <= 65535:
             raise ValueError("Puerto no válido (1–65535).")
-        if projects_on_port(self.list_projects(), port):
-            raise ValueError(f"El puerto {port} ya está asociado a otra instancia.")
         project_id = str(uuid.uuid4())
         global_cfg = self.load_global()
         project = ProjectConfig(
