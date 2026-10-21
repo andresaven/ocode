@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { runInNewContext } from "node:vm";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +46,7 @@ test("persistent Web can reopen without exposing stored authentication", async t
       OCODE_CONTROL_PATH: socketPath, OCODE_WEB_TOKEN: "fixture-browser-session",
       OPENCODE_SERVER_PASSWORD: "fixture-backend-only",
       OPENCODE_SERVER_USERNAME: "opencode",
+      OCODE_WEB_SHOW_AGENT: "true", OCODE_WEB_COLOR_SCHEME: "dark",
     },
     stdio: "ignore",
   });
@@ -100,7 +102,48 @@ test("persistent Web can reopen without exposing stored authentication", async t
     ...browser("/?_ocode_verify=1"), headers: { cookie: verifiedCookie },
   });
   assert.equal(verified.status, 302);
-  assert.equal(verified.headers.location, "/");
+  assert.equal(verified.headers.location, "/_ocode/web-preferences");
+  assert.equal((await request(browser("/_ocode/web-preferences"))).status, 401);
+  const bootstrap = await request({
+    ...browser(verified.headers.location), headers: { cookie: verifiedCookie },
+  });
+  assert.equal(bootstrap.status, 200);
+  assert.match(bootstrap.body, /web-preferences\.js/);
+  assert.equal(bootstrap.headers["cache-control"], "no-store");
+  const javascript = await request({
+    ...browser("/_ocode/web-preferences.js"), headers: { cookie: verifiedCookie },
+  });
+  assert.equal(javascript.status, 200);
+  const simulate = initial => {
+    const data = new Map(Object.entries(initial));
+    let destination = null;
+    runInNewContext(javascript.body, {
+      localStorage: {
+        getItem: key => data.has(key) ? data.get(key) : null,
+        setItem: (key, value) => data.set(key, value),
+      },
+      location: { replace: url => { destination = url; } },
+    });
+    assert.equal(destination, "/");
+    return data;
+  };
+  const empty = simulate({});
+  assert.deepEqual(JSON.parse(empty.get("settings.v3")),
+    { general: { showCustomAgents: true } });
+  assert.equal(empty.get("opencode-color-scheme"), "dark");
+  const existing = simulate({
+    "settings.v3": JSON.stringify({ general: { showCustomAgents: false }, appearance: { fontSize: 14 } }),
+    "opencode-color-scheme": "light",
+  });
+  assert.equal(JSON.parse(existing.get("settings.v3")).general.showCustomAgents, false);
+  assert.equal(JSON.parse(existing.get("settings.v3")).appearance.fontSize, 14);
+  assert.equal(existing.get("opencode-color-scheme"), "light");
+  const partial = simulate({ "settings.v3": JSON.stringify({ appearance: { fontSize: 14 } }) });
+  assert.deepEqual(JSON.parse(partial.get("settings.v3")),
+    { appearance: { fontSize: 14 }, general: { showCustomAgents: true } });
+  const invalid = simulate({ "settings.v3": "invalid" });
+  assert.equal(invalid.get("settings.v3"), "invalid");
+  assert.equal(invalid.get("opencode-color-scheme"), "dark");
   const verifiedInfo = await request({
     ...browser("/api/info"), headers: { cookie: verifiedCookie },
   });

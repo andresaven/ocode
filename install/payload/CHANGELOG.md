@@ -1,5 +1,12 @@
 # Cambios
 
+## 0.10.0
+
+- Las instancias nuevas heredan las preferencias Web iniciales de ocode:
+  Mostrar agente activado y esquema oscuro, configurables globalmente.
+- Al abrir la Web se respetan las preferencias existentes del navegador;
+  las instancias previas no reciben estos valores iniciales.
+
 ## 0.9.0
 
 - Varios proveedores de claves, OpenCode Go y OpenAI, cada uno con su fichero

@@ -139,6 +139,16 @@ Web y TUI comparten el servidor y pueden utilizarse simultáneamente.
 Cerrar una interfaz no detiene la otra. Salir de ocode tampoco detiene
 las instancias.
 
+Las instancias creadas a partir de ocode 0.10.0 toman de `config\config.json`
+los valores `web_show_agent` (por defecto `true`) y `web_color_scheme`
+(por defecto `"dark"`; admite `"light"`). Son valores iniciales de la
+**interfaz Web**, no ajustes de la TUI ni del agente predeterminado. Al abrir
+la Web desde ocode se aplican únicamente si el navegador aún no tiene esas
+preferencias para esa dirección y puerto. Cada instancia conserva sus valores
+iniciales aunque cambie la configuración global; los cambios realizados desde
+el navegador no se sobrescriben. Las instancias anteriores no se modifican.
+La selección de tema no está incluida.
+
 ### Ajustes y recreación
 
 Desde **Ajustes** puedes cambiar la working copy, Java, modo predeterminado,
