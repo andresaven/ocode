@@ -70,3 +70,15 @@ verificar algo, dilo; no afirmes que funciona.
 - No modifiques `JAVA_HOME` desde el shell. Comprueba con `java -version`; si no coincide con
   el proyecto, para y pide al usuario relanzar opencode con `JAVA_HOME` correcto.
 - Maven con `workdir` en el módulo, sin `Set-Location` ni rutas fuera del repo.
+
+
+## Preguntas al usuario
+
+Cuando necesites aclarar requisitos, usa la herramienta `question` para presentar
+preguntas modales. No simules preguntas modales escribiéndolas como texto en el
+chat, aunque uses emojis, encabezados u opciones.
+
+Agrupa en una sola llamada las preguntas independientes, con opciones claras y
+una recomendación cuando proceda. Espera las respuestas antes de continuar.
+Si la herramienta `question` no está disponible, informa de ello y pregunta en
+texto como alternativa.

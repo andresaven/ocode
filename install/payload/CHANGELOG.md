@@ -39,6 +39,12 @@
 
 ## Próxima versión
 
+- Las skills incluidas en `defaults/skills/<id>/SKILL.md` se instalan en las
+  skills globales al inicializar ocode, sin sobrescribir las personalizaciones
+  existentes del usuario.
+- Los defaults de OpenCode usan el formato nativo V2 de permisos; se conserva
+  el bloqueo de lectura de archivos `.properties`.
+
 ## 0.7.1
 
 - Actualización de versión para validar el sistema de actualización automática.
