@@ -67,9 +67,32 @@ class ContainerStatusTests(unittest.TestCase):
             with self.assertRaises(docker.DockerError):
                 docker.container_published_ports(self.cfg, "demo")
 
+    def test_published_port_owners_include_external_and_stopped_containers(self):
+        responses = [
+            Mock(stdout="externo\nocode-detenido\n"),
+            Mock(stdout='{"80/tcp":[{"HostPort":"4096"}]}'),
+            Mock(stdout='{"4096/tcp":[{"HostPort":"4096"}],"90/tcp":[{"HostPort":"4100"}]}'),
+        ]
+        with patch.object(docker, "run_capture", side_effect=responses) as run:
+            self.assertEqual(docker.published_port_owners(self.cfg), {
+                4096: ["externo", "ocode-detenido"], 4100: ["ocode-detenido"],
+            })
+        self.assertEqual(run.call_args_list[0].args[1], ["ps", "-a", "--format", "{{.Names}}"])
+        self.assertEqual(run.call_args_list[1].args[1], [
+            "inspect", "externo", "--format", "{{json .HostConfig.PortBindings}}",
+        ])
+
+    def test_published_port_owners_fails_closed(self):
+        with patch.object(docker, "run_capture", side_effect=docker.DockerError("motor no disponible")):
+            with self.assertRaisesRegex(docker.DockerError, "No se pudieron consultar"):
+                docker.published_port_owners(self.cfg)
+
 
 class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
     def make_app(self):
+        ports = patch("ocode.tui.published_port_owners", return_value={})
+        self.port_owners_mock = ports.start()
+        self.addCleanup(ports.stop)
         cfg = GlobalConfig.defaults()
         cfg.container_runtime = ContainerRuntime(kind="docker")
         cfg.check_updates = False
@@ -121,6 +144,20 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(table.get_row("added")[0], "Nuevo")
                 self.assertEqual(table.get_row("added")[3], "Sin iniciar")
 
+    async def test_main_screen_updates_port_after_returning_from_settings(self):
+        app = self.make_app()
+        with patch("ocode.tui.container_status", return_value="exited"):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                table = app.screen.query_one("#projects")
+                self.assertEqual(table.get_row("demo")[4], "4096")
+                app.open_project("demo")
+                await pilot.pause()
+                app.store.get_project.return_value.port = 4101
+                app.pop_screen()
+                await pilot.pause()
+                self.assertEqual(table.get_row("demo")[4], "4101")
+
     async def test_status_refresh_skips_row_removed_during_query(self):
         app = self.make_app()
         with patch("ocode.tui.container_status", return_value="exited"):
@@ -161,6 +198,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
             "image_exists": {"return_value": True},
             "build_launch_command": {"return_value": docker.CommandPreview([] if reused else ["mock"])},
             "container_published_ports": {"return_value": {4096}},
+            "published_port_owners": {"return_value": {}},
             "stop_container": {},
             "remove_container": {},
             "remove_state": {},
@@ -179,6 +217,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(mode=mode, status=status):
                     app = self.make_app()
                     mocks, other = self.mock_launch(app)
+                    mocks["published_port_owners"].return_value = {4096: [other.container_name]}
                     mocks["container_status"].return_value = status
                     mocks["container_status"].side_effect = None
                     with patch.object(app, "exit") as exit_app:
@@ -189,7 +228,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                             await pilot.pause()
                             self.assertIsInstance(app.screen, MessageScreen)
                             self.assertEqual(app.screen.title_text, "Error")
-                            self.assertIn(other.name, app.screen.message)
+                            self.assertIn(other.container_name, app.screen.message)
                             self.assertIn("puerto distinto", app.screen.message)
                             mocks["stop_container"].assert_not_called()
                             mocks["remove_container"].assert_not_called()
@@ -239,6 +278,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 app = self.make_app()
                 mocks, _ = self.mock_launch(app, reused=True)
                 app.store.get_project.return_value.port = 4321
+                mocks["published_port_owners"].return_value = {4096: ["contenedor-externo"]}
                 mocks["build_launch_command"].return_value = docker.CommandPreview(["mock"], reused=True)
                 async with app.run_test(size=(100, 40)) as pilot:
                     app.open_project("demo")
@@ -579,18 +619,106 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_add_project_suggests_first_unassigned_port(self):
         app = self.make_app()
-        app.store.list_projects.return_value.append(
-            ProjectConfig("second", "Segundo", "main", ".", port=4098)
-        )
+        self.port_owners_mock.return_value = {
+            4096: ["contenedor-externo"], 4098: ["otro-contenedor"],
+        }
         async with app.run_test(size=(100, 40)) as pilot:
             app.push_screen(AddProjectScreen())
             await pilot.pause()
+            await app.screen.workers.wait_for_complete()
             self.assertEqual(app.screen.query_one("#port", Input).value, "4097")
+            self.assertFalse(app.screen.query_one("#port", Input).disabled)
+
+    async def test_add_project_disables_port_while_query_is_pending(self):
+        app = self.make_app()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        real_to_thread = asyncio.to_thread
+
+        async def delayed(func, *args, **kwargs):
+            if func is self.port_owners_mock:
+                started.set()
+                await release.wait()
+                return {4096: ["contenedor-externo"]}
+            return await real_to_thread(func, *args, **kwargs)
+
+        async with app.run_test(size=(100, 40)) as pilot:
+            with patch("ocode.tui.asyncio.to_thread", side_effect=delayed):
+                app.push_screen(AddProjectScreen())
+                await started.wait()
+                screen = app.screen
+                port_input = screen.query_one("#port", Input)
+                self.assertTrue(port_input.disabled)
+                self.assertTrue(screen.query_one("#save", Button).disabled)
+                self.assertEqual(port_input.value, "4096")
+                release.set()
+                await screen.workers.wait_for_complete()
+                self.assertFalse(port_input.disabled)
+                self.assertFalse(screen.query_one("#save", Button).disabled)
+                self.assertEqual(port_input.value, "4097")
+
+    async def test_add_project_does_not_save_while_port_query_is_pending(self):
+        from tempfile import TemporaryDirectory
+
+        app = self.make_app()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        real_to_thread = asyncio.to_thread
+
+        async def delayed(func, *args, **kwargs):
+            if func is self.port_owners_mock:
+                started.set()
+                await release.wait()
+                return {}
+            return await real_to_thread(func, *args, **kwargs)
+
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            async with app.run_test(size=(100, 40)) as pilot:
+                with patch("ocode.tui.asyncio.to_thread", side_effect=delayed):
+                    app.push_screen(AddProjectScreen())
+                    await started.wait()
+                    screen = app.screen
+                    screen.query_one("#workspace", Input).value = directory
+                    await screen.save()
+                    app.store.create_project.assert_not_called()
+                    self.assertIsInstance(app.screen, MessageScreen)
+                    app.pop_screen()
+                    release.set()
+                    await screen.workers.wait_for_complete()
+
+    async def test_add_project_ignores_saved_instance_without_container(self):
+        app = self.make_app()
+        async with app.run_test(size=(100, 40)) as pilot:
+            app.push_screen(AddProjectScreen())
+            await pilot.pause()
+            await app.screen.workers.wait_for_complete()
+            self.assertEqual(app.screen.query_one("#port", Input).value, "4096")
+
+    async def test_add_project_does_not_assume_ports_free_when_engine_fails(self):
+        from tempfile import TemporaryDirectory
+
+        app = self.make_app()
+        self.port_owners_mock.side_effect = docker.DockerError("Motor no disponible")
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(AddProjectScreen())
+                await pilot.pause()
+                screen = app.screen
+                await screen.workers.wait_for_complete()
+                self.assertFalse(screen.query_one("#port", Input).disabled)
+                self.assertFalse(screen.query_one("#save", Button).disabled)
+                self.assertIn("Motor no disponible", str(screen.query_one("#port-notice", Static).render()))
+                screen.query_one("#workspace", Input).value = directory
+                await pilot.click("#save")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                app.store.create_project.assert_not_called()
 
     async def test_add_project_warns_and_refuses_assigned_port(self):
         from tempfile import TemporaryDirectory
 
         app = self.make_app()
+        self.port_owners_mock.return_value = {4096: ["contenedor-externo"]}
         with TemporaryDirectory(dir=Path(__file__).parent) as directory:
             async with app.run_test(size=(100, 40)) as pilot:
                 app.push_screen(AddProjectScreen())
@@ -599,7 +727,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 screen.query_one("#workspace", Input).value = directory
                 screen.query_one("#port", Input).value = "4096"
                 await pilot.pause()
-                self.assertIn("Proyecto", str(screen.query_one("#port-notice", Static).render()))
+                self.assertIn("contenedor-externo", str(screen.query_one("#port-notice", Static).render()))
                 await pilot.click("#save")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, MessageScreen)
@@ -608,9 +736,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_settings_warns_when_port_belongs_to_another_instance(self):
         app = self.make_app()
-        app.store.list_projects.return_value.append(
-            ProjectConfig("other", "Otro", "main", ".", port=4321)
-        )
+        self.port_owners_mock.return_value = {4321: ["contenedor-externo"]}
         with patch("ocode.tui.recreate_container") as recreate:
             async with app.run_test(size=(100, 40)) as pilot:
                 app.push_screen(ProjectSettingsScreen("demo"))
@@ -619,7 +745,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.click("#save")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, MessageScreen)
-                self.assertIn("Otro", app.screen.message)
+                self.assertIn("contenedor-externo", app.screen.message)
                 app.store.save_project.assert_not_called()
                 recreate.assert_not_called()
 
@@ -627,6 +753,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
         app = self.make_app()
         mocks, other = self.mock_launch(app)
         app.store.get_project.return_value.port = other.port
+        mocks["published_port_owners"].return_value = {other.port: [other.container_name]}
         with patch.object(app, "exit") as exit_app:
             async with app.run_test(size=(100, 40)) as pilot:
                 app.open_project("demo")
@@ -806,7 +933,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 app.push_screen(ProjectSettingsScreen("demo"))
                 await pilot.pause()
                 screen = app.screen
-                screen.save()
+                await screen.save()
                 await pilot.pause()
                 self.assertIsInstance(app.screen, ConfirmScreen)
                 self.assertIn("Se conservarán", app.screen.text)

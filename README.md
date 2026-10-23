@@ -115,14 +115,16 @@ originales del host**, salvo las rutas enmascaradas por la protección.
 Cada instancia publica su puerto Web. Utiliza puertos distintos para
 instancias que deban funcionar al mismo tiempo. El puerto predeterminado
 es `4096` y la dirección de escucha en el host es `127.0.0.1`.
-Al añadir una instancia, ocode propone el primer puerto sin asignar desde
-el predeterminado, contando también las instancias detenidas. Puedes editar
-la propuesta, pero un puerto ya asociado a otra instancia se señala y no
-permite guardar la nueva. Tampoco se permite guardar ese puerto desde los
-Ajustes de otra instancia. Si una instancia ya configurada comparte puerto
-con otra, ocode avisa antes de crear su contenedor. Si un proceso ajeno a
-ocode ocupa el puerto, el arranque falla sin cambiar automáticamente de
-puerto ni afectar a otras instancias.
+Al añadir una instancia, ocode consulta los puertos publicados por todos los
+contenedores del motor configurado, incluidos los detenidos, y propone el
+primer puerto libre desde el predeterminado. Las instancias guardadas en
+ocode sin contenedor no reservan puerto; los contenedores ajenos a ocode sí.
+El campo Puerto y el botón Guardar permanecen deshabilitados mientras se
+consulta el motor.
+Puedes editar la propuesta, pero un puerto asociado a un contenedor se señala
+y no permite guardar la instancia, tampoco desde Ajustes. Si el motor no
+responde, ocode no supone que los puertos están libres. El arranque no cambia
+de puerto automáticamente ni afecta a otros contenedores.
 
 ## Gestionar instancias
 

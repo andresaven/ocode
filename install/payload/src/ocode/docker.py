@@ -861,6 +861,23 @@ def container_published_ports(cfg: GlobalConfig, name: str) -> set[int]:
         raise DockerError("No se pudieron consultar los puertos de la instancia.") from exc
 
 
+def published_port_owners(cfg: GlobalConfig) -> dict[int, list[str]]:
+    """List host port bindings for every container, including stopped ones."""
+    engine = resolve_engine(cfg)
+    try:
+        containers = run_capture(engine, ["ps", "-a", "--format", "{{.Names}}"])
+        names = containers.stdout.splitlines()
+        result: dict[int, list[str]] = {}
+        for name in names:
+            if not name:
+                continue
+            for port in container_published_ports(cfg, name):
+                result.setdefault(port, []).append(name)
+        return result
+    except DockerError as exc:
+        raise DockerError("No se pudieron consultar los puertos del motor de contenedores.") from exc
+
+
 def container_exists(cfg: GlobalConfig, name: str) -> bool:
     engine = resolve_engine(cfg)
     cp = subprocess.run(
