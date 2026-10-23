@@ -313,6 +313,8 @@ monta las skills de cada proyecto fuera de `/workspace` y las registra desde la
 configuración global, por lo que no dependen de activar el JSONC específico.
 Las skills generales son de solo lectura; las del proyecto y el AGENTS
 específico permiten escritura desde OpenCode.
+Las skills incluidas en `app\defaults\skills\<id>\SKILL.md` se copian a
+`config\skills\` al inicializar ocode; una skill que ya exista no se sobrescribe.
 
 Para instalar una skill desde OpenCode en una instancia, utiliza
 `/etc/ocode/project-skills/<id>/SKILL.md` (también para sus dependencias).
