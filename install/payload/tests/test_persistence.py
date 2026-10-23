@@ -15,6 +15,27 @@ from ocode.model import ContainerRuntime, GlobalConfig, MAVEN_VERSION, ProjectCo
 from ocode.paths import Paths
 
 
+class OpenCodeV2DefaultsTests(unittest.TestCase):
+    defaults = Path(__file__).resolve().parents[1] / "defaults"
+
+    def test_global_defaults_use_v2_permissions_and_preserve_properties_deny(self):
+        config = (self.defaults / "opencode.jsonc").read_text(encoding="utf-8")
+        self.assertIn('"permissions": [', config)
+        self.assertNotIn('"permission": {', config)
+        self.assertIn('"action": "shell"', config)
+        self.assertIn('"action": "glob"', config)
+        self.assertIn(
+            '{ "action": "read", "resource": "*.properties", "effect": "deny" }',
+            config,
+        )
+
+    def test_project_defaults_use_v2_permissions(self):
+        config = (self.defaults / "project-opencode.jsonc").read_text(encoding="utf-8")
+        self.assertIn('"permissions": [', config)
+        self.assertNotIn('"permission": {', config)
+        self.assertIn('"action": "glob"', config)
+
+
 class PersistenceTests(unittest.TestCase):
     def setUp(self):
         self.cfg = GlobalConfig.defaults()

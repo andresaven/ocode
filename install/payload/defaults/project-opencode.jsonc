@@ -1,50 +1,52 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "permission": {
-    "read": {
-      "*src/main/resources/configuration/des*": "deny",
-      "*src/main/resources/configuration/pre*": "deny",
-      "*src/main/resources/configuration/prod*": "deny",
-      "*src/main/resources/certs*": "deny",
-      "*src/main/resources/application-desa.yaml*": "deny",
-      "*src/main/resources/application-pre.yaml*": "deny",
-      "*src/main/resources/application-pro.yaml*": "deny",
-      "*src/main/resources/db/production*": "deny",
-      "*src/main/resources/db/db.changelog-desa.yaml*": "deny",
-      "*src/main/resources/db/db.changelog-pre.yaml*": "deny",
-      "*src/main/resources/db/liquibase-desa.properties*": "deny",
-      "*src/main/resources/db/liquibase-pre.properties*": "deny",
-      "*k8s*": "deny"
-    },
-    "edit": {
-      "*src/main/resources/configuration/des*": "deny",
-      "*src/main/resources/configuration/pre*": "deny",
-      "*src/main/resources/configuration/prod*": "deny",
-      "*src/main/resources/certs*": "deny",
-      "*src/main/resources/application-desa.yaml*": "deny",
-      "*src/main/resources/application-pre.yaml*": "deny",
-      "*src/main/resources/application-pro.yaml*": "deny",
-      "*src/main/resources/db/production*": "deny",
-      "*src/main/resources/db/db.changelog-desa.yaml*": "deny",
-      "*src/main/resources/db/db.changelog-pre.yaml*": "deny",
-      "*src/main/resources/db/liquibase-desa.properties*": "deny",
-      "*src/main/resources/db/liquibase-pre.properties*": "deny",
-      "*k8s*": "deny"
-    },
-    "list": {
-      "*src/main/resources/configuration/des*": "deny",
-      "*src/main/resources/configuration/pre*": "deny",
-      "*src/main/resources/configuration/prod*": "deny",
-      "*src/main/resources/certs*": "deny",
-      "*src/main/resources/application-desa.yaml*": "deny",
-      "*src/main/resources/application-pre.yaml*": "deny",
-      "*src/main/resources/application-pro.yaml*": "deny",
-      "*src/main/resources/db/production*": "deny",
-      "*src/main/resources/db/db.changelog-desa.yaml*": "deny",
-      "*src/main/resources/db/db.changelog-pre.yaml*": "deny",
-      "*src/main/resources/db/liquibase-desa.properties*": "deny",
-      "*src/main/resources/db/liquibase-pre.properties*": "deny",
-      "*k8s*": "deny"
-    }
-  }
+  "permissions": [
+    // Permitir preguntas modales.
+    { "action": "question", "resource": "*", "effect": "allow" },
+
+    // Bloquear lectura de archivos y rutas sensibles.
+    { "action": "read", "resource": "*src/main/resources/configuration/des*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/configuration/pre*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/configuration/prod*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/certs*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/application-desa.yaml*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/application-pre.yaml*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/application-pro.yaml*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/db/production*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/db/db.changelog-desa.yaml*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/db/db.changelog-pre.yaml*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/db/liquibase-desa.properties*", "effect": "deny" },
+    { "action": "read", "resource": "*src/main/resources/db/liquibase-pre.properties*", "effect": "deny" },
+    { "action": "read", "resource": "*k8s*", "effect": "deny" },
+
+    // Bloquear edición de archivos y rutas sensibles.
+    { "action": "edit", "resource": "*src/main/resources/configuration/des*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/configuration/pre*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/configuration/prod*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/certs*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/application-desa.yaml*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/application-pre.yaml*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/application-pro.yaml*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/db/production*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/db/db.changelog-desa.yaml*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/db/db.changelog-pre.yaml*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/db/liquibase-desa.properties*", "effect": "deny" },
+    { "action": "edit", "resource": "*src/main/resources/db/liquibase-pre.properties*", "effect": "deny" },
+    { "action": "edit", "resource": "*k8s*", "effect": "deny" },
+
+    // Bloquear que las búsquedas de archivos enumeren esas rutas.
+    { "action": "glob", "resource": "*src/main/resources/configuration/des*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/configuration/pre*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/configuration/prod*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/certs*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/application-desa.yaml*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/application-pre.yaml*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/application-pro.yaml*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/db/production*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/db/db.changelog-desa.yaml*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/db/db.changelog-pre.yaml*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/db/liquibase-desa.properties*", "effect": "deny" },
+    { "action": "glob", "resource": "*src/main/resources/db/liquibase-pre.properties*", "effect": "deny" },
+    { "action": "glob", "resource": "*k8s*", "effect": "deny" }
+  ]
 }
