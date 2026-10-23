@@ -110,6 +110,8 @@ class GlobalConfig:
     default_maven_repository: str = ""
     check_updates: bool = True
     skipped_update_version: str = ""
+    web_show_agent: bool = True
+    web_color_scheme: str = "dark"
     container_runtime: ContainerRuntime = field(default_factory=ContainerRuntime)
     runtimes: dict[str, RuntimeProfile] = field(default_factory=dict)
 
@@ -140,6 +142,12 @@ class GlobalConfig:
     @classmethod
     def from_dict(cls, data):
         defaults = cls.defaults()
+        show_agent = data.get("web_show_agent", defaults.web_show_agent)
+        color_scheme = data.get("web_color_scheme", defaults.web_color_scheme)
+        if type(show_agent) is not bool:
+            raise ValueError("web_show_agent debe ser un booleano")
+        if color_scheme not in ("light", "dark"):
+            raise ValueError("web_color_scheme debe ser light o dark")
         # Built-in Java runtimes are managed by ocode and tied to the
         # OpenCode and Maven versions. This replaces earlier image tags and
         # forces a rebuild when either runtime version changes.
@@ -170,6 +178,8 @@ class GlobalConfig:
             default_maven_repository=data.get("default_maven_repository", ""),
             check_updates=bool(data.get("check_updates", True)),
             skipped_update_version=str(data.get("skipped_update_version", "")),
+            web_show_agent=show_agent,
+            web_color_scheme=color_scheme,
             container_runtime=runtime,
             runtimes=runtimes,
         )
@@ -189,6 +199,7 @@ class ProjectConfig:
     project_config_enabled: bool = False
     maven_repository: str = ""
     build_paths: list[str] = field(default_factory=list)
+    web_initial_preferences: dict | None = None
 
     def to_dict(self):
         return asdict(self)
@@ -274,3 +285,12 @@ class ProjectConfig:
             result.append((path, name))
 
         return result
+
+
+def next_project_port(default_port: int, assigned: set[int]) -> int:
+    if not 1 <= default_port <= 65535:
+        raise ValueError("Puerto predeterminado no válido (1–65535).")
+    for port in range(default_port, 65536):
+        if port not in assigned:
+            return port
+    raise ValueError("No quedan puertos disponibles desde el puerto predeterminado.")

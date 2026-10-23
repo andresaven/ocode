@@ -41,6 +41,7 @@ from .docker import (
     container_exists,
     container_logs,
     container_published_ports,
+    published_port_owners,
     container_running,
     container_status,
     docker_available,
@@ -60,7 +61,7 @@ from .docker import (
 )
 from .doctor import doctor
 from .storage import container_directories, storage_report
-from .model import ProjectConfig, format_build_paths, parse_build_paths
+from .model import ProjectConfig, format_build_paths, parse_build_paths, next_project_port
 from .paths import Paths
 from .store import Store
 from .update import Release, check_for_update, stage_update
@@ -347,6 +348,9 @@ class AddProjectScreen(Screen):
 
     def compose(self) -> ComposeResult:
         cfg = self.app.global_cfg
+        self.port_owners: dict[int, list[str]] = {}
+        self.port_error = "Consultando puertos del motor de contenedores…"
+        self.port_ready = False
         java_options = [
             (f"Java {profile.java}", name)
             for name, profile in cfg.runtimes.items()
@@ -403,12 +407,52 @@ class AddProjectScreen(Screen):
                 type="integer",
                 id="port",
                 classes="field",
+                disabled=True,
             )
+            yield Static(self.port_error, id="port-notice", classes="hint")
 
         with Horizontal(id="buttons"):
-            yield Button("Guardar", id="save", variant="success")
+            yield Button("Guardar", id="save", variant="success", disabled=True)
             yield Button("Cancelar", id="cancel")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self.refresh_port_suggestion()
+
+    @work(exclusive=True, group="suggest-port")
+    async def refresh_port_suggestion(self) -> None:
+        port_input = self.query_one("#port", Input)
+        original = port_input.value
+        try:
+            owners = await asyncio.to_thread(published_port_owners, self.app.global_cfg)
+            suggested = next_project_port(self.app.global_cfg.default_port, set(owners))
+        except (DockerError, ValueError) as exc:
+            self.port_error = str(exc)
+            self.query_one("#port-notice", Static).update(self.port_error)
+            return
+        else:
+            self.port_owners = owners
+            self.port_error = ""
+            if port_input.value == original:
+                port_input.value = str(suggested)
+            self.show_port_notice(port_input.value)
+        finally:
+            port_input.disabled = False
+            self.query_one("#save", Button).disabled = False
+            self.port_ready = True
+
+    def show_port_notice(self, value: str) -> None:
+        try:
+            port = int(value)
+        except ValueError:
+            port = 0
+        owners = self.port_owners.get(port, [])
+        notice = (
+            f"Aviso: el puerto {port} ya está asociado a "
+            + ", ".join(owners) + ". Elige otro puerto."
+            if owners else self.port_error
+        )
+        self.query_one("#port-notice", Static).update(notice)
 
     @on(Button.Pressed, "#browse")
     def browse(self) -> None:
@@ -444,8 +488,19 @@ class AddProjectScreen(Screen):
     def cancel(self) -> None:
         self.app.pop_screen()
 
+    @on(Input.Changed, "#port")
+    def port_changed(self, event: Input.Changed) -> None:
+        self.show_port_notice(event.value)
+
     @on(Button.Pressed, "#save")
-    def save(self) -> None:
+    async def save(self) -> None:
+        if not self.port_ready:
+            self.app.push_screen(MessageScreen(
+                "Consulta en curso",
+                "Espera a que termine la consulta de puertos del motor de contenedores.",
+            ))
+            return
+
         workspace = self.query_one("#workspace", Input).value.strip()
         name = self.query_one("#name", Input).value.strip()
         branch = self.query_one("#branch", Input).value.strip()
@@ -467,8 +522,22 @@ class AddProjectScreen(Screen):
 
         try:
             port = int(port_text)
+            if not 1 <= port <= 65535:
+                raise ValueError
         except ValueError:
-            self.app.push_screen(MessageScreen("Error", "Puerto no válido."))
+            self.app.push_screen(MessageScreen("Error", "Puerto no válido (1–65535)."))
+            return
+
+        try:
+            owners = (await asyncio.to_thread(published_port_owners, self.app.global_cfg)).get(port, [])
+        except DockerError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
+        if owners:
+            self.app.push_screen(MessageScreen(
+                "Puerto ya asociado",
+                f"El puerto {port} ya está asociado a {', '.join(owners)}. Elige otro puerto.",
+            ))
             return
 
         try:
@@ -486,16 +555,20 @@ class AddProjectScreen(Screen):
             self.app.push_screen(MessageScreen("Error", str(exc)))
             return
 
-        project = self.app.store.create_project(
-            name=name,
-            branch=branch,
-            workspace=workspace,
-            runtime=runtime,
-            default_mode=mode,
-            port=port,
-            maven_repository=maven_repository,
-            build_paths=build_paths,
-        )
+        try:
+            project = self.app.store.create_project(
+                name=name,
+                branch=branch,
+                workspace=workspace,
+                runtime=runtime,
+                default_mode=mode,
+                port=port,
+                maven_repository=maven_repository,
+                build_paths=build_paths,
+            )
+        except ValueError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
         self.app.pop_screen()
         self.app.open_project(project.project_id)
 
@@ -812,7 +885,7 @@ class ProjectSettingsScreen(SaveRecreateScreen):
             yield Button("Abrir configuración", id="open-config")
 
     @on(Button.Pressed, "#save")
-    def save(self) -> None:
+    async def save(self) -> None:
         p = replace(self.app.store.get_project(self.project_id))
         workspace = self.query_one("#workspace", Input).value.strip()
         if not Path(workspace).is_dir():
@@ -848,6 +921,19 @@ class ProjectSettingsScreen(SaveRecreateScreen):
                 raise ValueError
         except ValueError:
             self.app.push_screen(MessageScreen("Error", "Puerto no válido (1–65535)."))
+            return
+        try:
+            owners = [name for name in (
+                await asyncio.to_thread(published_port_owners, self.app.global_cfg)
+            ).get(p.port, []) if name != p.container_name]
+        except DockerError as exc:
+            self.app.push_screen(MessageScreen("Error", str(exc)))
+            return
+        if owners:
+            self.app.push_screen(MessageScreen(
+                "Puerto ya asociado",
+                f"El puerto {p.port} ya está asociado a {', '.join(owners)}. Elige otro puerto.",
+            ))
             return
         p.project_agents_enabled = self.query_one("#agents_enabled", Switch).value
         p.project_config_enabled = self.query_one("#config_enabled", Switch).value
@@ -1525,6 +1611,16 @@ class ProjectScreen(Screen):
                 p.container_name,
             )
 
+            if not existing:
+                ports = await asyncio.to_thread(published_port_owners, self.app.global_cfg)
+                owners = ports.get(p.port, [])
+                if owners:
+                    raise DockerError(
+                        f"El puerto {p.port} ya está asociado a {', '.join(owners)}. "
+                        "Elige un puerto distinto en Ajustes antes de iniciar esta instancia. "
+                        "No se ha modificado ninguna otra instancia."
+                    )
+
             profile = self.app.global_cfg.runtimes.get(p.runtime)
             if profile is None:
                 raise DockerError(f"Runtime desconocido: {p.runtime}")
@@ -1569,23 +1665,12 @@ class ProjectScreen(Screen):
             web_port = next(iter(ports)) if len(ports) == 1 else p.port
             conflicts = []
             if preview.args and ports:
-                projects = await asyncio.to_thread(self.app.store.list_projects)
-                for other in projects:
-                    if other.container_name == p.container_name:
-                        continue
-                    status = await asyncio.to_thread(
-                        container_status, self.app.global_cfg, other.container_name,
-                    )
-                    if status not in ("running", "restarting", "paused"):
-                        continue
-                    other_ports = await asyncio.to_thread(
-                        container_published_ports, self.app.global_cfg, other.container_name,
-                    )
-                    if ports & other_ports:
-                        conflicts.append(other)
+                owners = await asyncio.to_thread(published_port_owners, self.app.global_cfg)
+                conflicts = sorted({name for port in ports for name in owners.get(port, [])
+                                    if name != p.container_name})
 
             if conflicts:
-                names = "\n".join(f"- {other.name} / {other.branch}" for other in conflicts)
+                names = "\n".join(f"- {name}" for name in conflicts)
                 raise DockerError(
                     f"El puerto de esta instancia está ocupado por:\n{names}\n\n"
                     "Configura un puerto distinto en Ajustes. Si el contenedor ya "
@@ -2074,7 +2159,12 @@ class MainScreen(Screen):
         projects = self.app.store.list_projects()
         existing = {key.value for key in table.rows}
         for project in projects:
-            if project.project_id not in existing:
+            if project.project_id in existing:
+                table.update_cell_at(
+                    Coordinate(table.get_row_index(project.project_id), 4),
+                    str(project.port),
+                )
+            else:
                 profile = self.app.global_cfg.runtimes.get(project.runtime)
                 java = profile.java if profile else project.runtime
                 table.add_row(

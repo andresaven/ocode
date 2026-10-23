@@ -591,6 +591,17 @@ def build_run_command(
         server_password = secrets.token_urlsafe(32)
         backend_port = 4097 if project.port != 4097 else 4098
 
+        if project.web_initial_preferences is not None:
+            preferences = project.web_initial_preferences
+            show_agent = preferences.get("show_agent")
+            color_scheme = preferences.get("color_scheme")
+            if type(show_agent) is not bool or color_scheme not in ("light", "dark"):
+                raise DockerError("Preferencias Web iniciales no válidas")
+            args.extend([
+                "-e", f"OCODE_WEB_SHOW_AGENT={str(show_agent).lower()}",
+                "-e", f"OCODE_WEB_COLOR_SCHEME={color_scheme}",
+            ])
+
         args.extend(
             [
                 "-p",
@@ -848,6 +859,23 @@ def container_published_ports(cfg: GlobalConfig, name: str) -> set[int]:
         }
     except (ValueError, TypeError, AttributeError, KeyError) as exc:
         raise DockerError("No se pudieron consultar los puertos de la instancia.") from exc
+
+
+def published_port_owners(cfg: GlobalConfig) -> dict[int, list[str]]:
+    """List host port bindings for every container, including stopped ones."""
+    engine = resolve_engine(cfg)
+    try:
+        containers = run_capture(engine, ["ps", "-a", "--format", "{{.Names}}"])
+        names = containers.stdout.splitlines()
+        result: dict[int, list[str]] = {}
+        for name in names:
+            if not name:
+                continue
+            for port in container_published_ports(cfg, name):
+                result.setdefault(port, []).append(name)
+        return result
+    except DockerError as exc:
+        raise DockerError("No se pudieron consultar los puertos del motor de contenedores.") from exc
 
 
 def container_exists(cfg: GlobalConfig, name: str) -> bool:

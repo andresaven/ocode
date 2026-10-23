@@ -115,6 +115,16 @@ originales del host**, salvo las rutas enmascaradas por la protección.
 Cada instancia publica su puerto Web. Utiliza puertos distintos para
 instancias que deban funcionar al mismo tiempo. El puerto predeterminado
 es `4096` y la dirección de escucha en el host es `127.0.0.1`.
+Al añadir una instancia, ocode consulta los puertos publicados por todos los
+contenedores del motor configurado, incluidos los detenidos, y propone el
+primer puerto libre desde el predeterminado. Las instancias guardadas en
+ocode sin contenedor no reservan puerto; los contenedores ajenos a ocode sí.
+El campo Puerto y el botón Guardar permanecen deshabilitados mientras se
+consulta el motor.
+Puedes editar la propuesta, pero un puerto asociado a un contenedor se señala
+y no permite guardar la instancia, tampoco desde Ajustes. Si el motor no
+responde, ocode no supone que los puertos están libres. El arranque no cambia
+de puerto automáticamente ni afecta a otros contenedores.
 
 ## Gestionar instancias
 
@@ -138,6 +148,16 @@ permite consultarlo de nuevo; si el motor no responde se muestra
 Web y TUI comparten el servidor y pueden utilizarse simultáneamente.
 Cerrar una interfaz no detiene la otra. Salir de ocode tampoco detiene
 las instancias.
+
+Las instancias creadas a partir de ocode 0.10.0 toman de `config\config.json`
+los valores `web_show_agent` (por defecto `true`) y `web_color_scheme`
+(por defecto `"dark"`; admite `"light"`). Son valores iniciales de la
+**interfaz Web**, no ajustes de la TUI ni del agente predeterminado. Al abrir
+la Web desde ocode se aplican únicamente si el navegador aún no tiene esas
+preferencias para esa dirección y puerto. Cada instancia conserva sus valores
+iniciales aunque cambie la configuración global; los cambios realizados desde
+el navegador no se sobrescriben. Las instancias anteriores no se modifican.
+La selección de tema no está incluida.
 
 ### Ajustes y recreación
 
@@ -293,6 +313,15 @@ monta las skills de cada proyecto fuera de `/workspace` y las registra desde la
 configuración global, por lo que no dependen de activar el JSONC específico.
 Las skills generales son de solo lectura; las del proyecto y el AGENTS
 específico permiten escritura desde OpenCode.
+
+Para instalar una skill desde OpenCode en una instancia, utiliza
+`/etc/ocode/project-skills/<id>/SKILL.md` (también para sus dependencias).
+No la instales en `/workspace/.opencode/skills/` ni en otra ruta de la
+working copy. Las skills globales se instalan desde el host en
+`config\skills\<id>\SKILL.md`, ya que su montaje es de solo lectura dentro
+del contenedor. Si los permisos impiden escribir la skill específica, hay
+que instalarla manualmente en la carpeta de skills de esa instancia en el
+host; no se usa la working copy como alternativa.
 
 La configuración global de OpenCode también se monta en solo lectura.
 La específica, cuando está activada, se monta en `/opencode.jsonc`, fuera

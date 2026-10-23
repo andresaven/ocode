@@ -127,6 +127,38 @@ class PersistenceTests(unittest.TestCase):
                 self.assertNotIn(preview.server_password, preview.powershell())
                 self.assertNotIn(preview.web_token, preview.powershell())
 
+    def test_web_defaults_only_passed_for_new_projects(self):
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            paths = Paths(Path(directory))
+            paths.web_proxy_script.parent.mkdir(parents=True)
+            paths.web_proxy_script.touch()
+            paths.instructions_script.touch()
+            self.project.workspace = directory
+            self.project.web_initial_preferences = {"show_agent": True, "color_scheme": "dark"}
+            preview = docker.build_run_command(
+                paths=paths, global_cfg=self.cfg, project=self.project,
+                mode="serve", detached=True,
+            )
+            self.assertIn("OCODE_WEB_SHOW_AGENT=true", preview.args)
+            self.assertIn("OCODE_WEB_COLOR_SCHEME=dark", preview.args)
+            self.project.web_initial_preferences = None
+            legacy = docker.build_run_command(
+                paths=paths, global_cfg=self.cfg, project=self.project,
+                mode="serve", detached=True,
+            )
+            self.assertNotIn("OCODE_WEB_SHOW_AGENT=true", legacy.args)
+            self.assertNotIn("OCODE_WEB_COLOR_SCHEME=dark", legacy.args)
+
+    def test_web_defaults_validate_configuration(self):
+        cfg = GlobalConfig.from_dict({})
+        self.assertTrue(cfg.web_show_agent)
+        self.assertEqual(cfg.web_color_scheme, "dark")
+        self.assertFalse(GlobalConfig.from_dict({"web_show_agent": False}).web_show_agent)
+        self.assertEqual(GlobalConfig.from_dict({"web_color_scheme": "light"}).web_color_scheme, "light")
+        for data in ({"web_show_agent": "false"}, {"web_color_scheme": "invalid"}):
+            with self.subTest(data=data), self.assertRaises(ValueError):
+                GlobalConfig.from_dict(data)
+
     def test_web_port_4097_uses_a_distinct_backend_for_tui(self):
         with TemporaryDirectory(dir=Path(__file__).parent) as directory:
             paths = Paths(Path(directory))

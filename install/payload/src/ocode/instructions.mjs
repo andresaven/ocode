@@ -15,7 +15,10 @@ export function syncInstructions({ globalSource, projectSource, target, onError 
       "Regla de ocode: las instrucciones globales prevalecen ante contradicciones. " +
       "Para cualquier petición general de crear o editar el AGENTS de este proyecto, usa /etc/ocode/project-AGENTS.md e informa al usuario de esa ruta. " +
       "No crees /workspace/AGENTS.md para esa petición; úsalo solo si se pide expresamente crear o modificar el archivo dentro del repositorio. " +
-      "Las skills específicas están en /etc/ocode/project-skills/ y fuera del workspace.";
+      "Para instalar skills en esta instancia, usa /etc/ocode/project-skills/<id>/SKILL.md, fuera de /workspace; incluye las skills de las que dependa. " +
+      "No instales skills en /workspace ni en .opencode/skills del repositorio como sustituto. " +
+      "Las skills globales están montadas en solo lectura: indica al usuario que debe colocarlas en config/skills/<id>/SKILL.md del host. " +
+      "Si las reglas o los permisos impiden escribir en la ruta específica, no busques otra vía: informa al usuario de la ruta y los pasos manuales, sin afirmar que quedaron instaladas.";
     if (contents === previous) return;
     mkdirSync(dirname(target), { recursive: true });
     // Atomic replacement avoids OpenCode reading partially written guidance.

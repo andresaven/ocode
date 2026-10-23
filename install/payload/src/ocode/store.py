@@ -447,7 +447,10 @@ class Store:
         maven_repository: str = "",
         build_paths: list[str] | None = None,
     ) -> ProjectConfig:
+        if not 1 <= port <= 65535:
+            raise ValueError("Puerto no válido (1–65535).")
         project_id = str(uuid.uuid4())
+        global_cfg = self.load_global()
         project = ProjectConfig(
             project_id=project_id,
             name=name,
@@ -458,6 +461,10 @@ class Store:
             port=port,
             maven_repository=maven_repository,
             build_paths=list(build_paths or []),
+            web_initial_preferences={
+                "show_agent": global_cfg.web_show_agent,
+                "color_scheme": global_cfg.web_color_scheme,
+            },
             sensitive_paths=list(BUILTIN_SENSITIVE_PATHS),
         )
 
