@@ -360,6 +360,7 @@ class Store:
             shutil.copy2(self.paths.default_agents, self.paths.global_agents)
 
         self.paths.global_skills.mkdir(parents=True, exist_ok=True)
+        self._install_default_skills()
         _ensure_project_skills_source(self.paths.opencode_config)
         _ensure_external_edit_rules(self.paths.opencode_config)
 
@@ -405,6 +406,20 @@ class Store:
             )
 
         return cfg
+
+    def _install_default_skills(self) -> None:
+        """Copy bundled global skills without replacing host customizations."""
+        if not self.paths.default_skills.is_dir():
+            return
+
+        for source in sorted(self.paths.default_skills.glob("*/SKILL.md")):
+            if not source.is_file():
+                continue
+            target = self.paths.global_skills / source.parent.name / "SKILL.md"
+            if target.exists():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
 
     def load_global(self) -> GlobalConfig:
         data = json.loads(self.paths.global_config.read_text(encoding="utf-8"))
