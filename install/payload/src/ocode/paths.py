@@ -32,6 +32,7 @@ class Paths:
 
         self.default_agents = self.defaults_dir / "AGENTS.md"
         self.default_opencode_config = self.defaults_dir / "opencode.jsonc"
+        self.default_skills = self.defaults_dir / "skills"
         self.default_project_agents = self.defaults_dir / "project-AGENTS.md"
         self.default_project_config = self.defaults_dir / "project-opencode.jsonc"
 

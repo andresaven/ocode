@@ -36,6 +36,30 @@ class SensitivePathsTests(unittest.TestCase):
         self.assertTrue(self.paths.global_skills.is_dir())
         self.assertTrue(self.paths.project_skills(self.project.project_id).is_dir())
 
+    def test_default_skills_are_installed_globally_without_overwriting(self):
+        for skill_id in ("grill-me", "grilling", "docx"):
+            with self.subTest(skill=skill_id):
+                default = self.paths.default_skills / skill_id / "SKILL.md"
+                installed = self.paths.global_skills / skill_id / "SKILL.md"
+                self.assertTrue(default.is_file())
+                self.assertEqual(installed.read_bytes(), default.read_bytes())
+
+        customized = self.paths.global_skills / "grill-me" / "SKILL.md"
+        customized.write_text("Personalización", encoding="utf-8")
+        self.store.initialize()
+        self.assertEqual(customized.read_text(encoding="utf-8"), "Personalización")
+
+    def test_later_default_skills_are_added_without_replacing_existing_ones(self):
+        skill_id = "local-extra"
+        default = self.paths.default_skills / skill_id / "SKILL.md"
+        default.parent.mkdir(parents=True)
+        default.write_text("Skill distribuida", encoding="utf-8")
+
+        self.store.initialize()
+
+        installed = self.paths.global_skills / skill_id / "SKILL.md"
+        self.assertEqual(installed.read_text(encoding="utf-8"), "Skill distribuida")
+
     def test_existing_global_config_keeps_skills_and_gets_ocode_source(self):
         original = '{\n  "$schema": "https://opencode.ai/config.json",\n  "skills": ["./team-skills"],\n  "model": "local/model"\n}\n'
         self.paths.opencode_config.write_text(original, encoding="utf-8")
