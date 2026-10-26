@@ -1,5 +1,20 @@
 # Cambios
 
+## 0.11.1
+
+- La skill `docx` prioriza Node.js en los contenedores, conserva el estilo del
+  documento original y respeta las rutas de trabajo indicadas por el usuario.
+
+## 0.11.0
+
+- Las skills incluidas en `defaults/skills/<id>/SKILL.md` se instalan en las
+  skills globales al inicializar ocode, sin sobrescribir las personalizaciones
+  existentes del usuario.
+- Los defaults de OpenCode usan el formato nativo V2 de permisos; se conserva
+  el bloqueo de lectura de archivos `.properties`.
+- La skill `grilling` presenta las preguntas de cada ronda mediante un diálogo
+  modal en lugar de formularios de texto plano.
+
 ## 0.10.0
 
 - Las instancias nuevas heredan las preferencias Web iniciales de ocode:
@@ -36,16 +51,6 @@
   proyecto se pueden editar desde OpenCode.
 - El AGENTS específico de la instancia se puede editar desde el contenedor y
   queda diferenciado del AGENTS propio del repositorio.
-
-## 0.11.0
-
-- Las skills incluidas en `defaults/skills/<id>/SKILL.md` se instalan en las
-  skills globales al inicializar ocode, sin sobrescribir las personalizaciones
-  existentes del usuario.
-- Los defaults de OpenCode usan el formato nativo V2 de permisos; se conserva
-  el bloqueo de lectura de archivos `.properties`.
-- La skill `grilling` presenta las preguntas de cada ronda mediante un diálogo
-  modal en lugar de formularios de texto plano.
 
 ## 0.7.1
 
