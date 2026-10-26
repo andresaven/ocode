@@ -1,5 +1,15 @@
 # Cambios
 
+## 0.11.2
+
+- La skill `docx` debe cargarse para cualquier operación Word y ahora define
+  un flujo Node explícito para extraer contenido y contrastarlo con código.
+  La instrucción efectiva del contenedor también exige cargarla antes de actuar.
+- La extracción DOCX no se considera imposible solo porque falten los paquetes
+  `mammoth` o `docx`; la skill comprueba también herramientas ZIP disponibles.
+- Si no hay una vía Node lista, las instrucciones efectivas exigen ofrecer la
+  instalación autorizada de una dependencia local antes de abandonar la tarea.
+
 ## 0.11.1
 
 - La skill `docx` prioriza Node.js en los contenedores, conserva el estilo del
