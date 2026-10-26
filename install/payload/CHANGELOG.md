@@ -1,6 +1,6 @@
 # Cambios
 
-## Próxima versión
+## 0.11.1
 
 - La skill `docx` prioriza Node.js en los contenedores, conserva el estilo del
   documento original y respeta las rutas de trabajo indicadas por el usuario.
