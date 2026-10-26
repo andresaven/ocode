@@ -29,6 +29,12 @@ test("effective instructions preserve global and project rules without editing s
   assert.match(effective, /\/etc\/ocode\/project-skills\/<id>\/SKILL\.md/);
   assert.match(effective, /No instales skills en \/workspace ni en \.opencode\/skills del repositorio/);
   assert.match(effective, /config\/skills\/<id>\/SKILL\.md del host/);
+  assert.match(effective, /Para cualquier tarea con documentos Word \(\.docx\), carga primero la skill docx/);
+  assert.match(effective, /usa Node\.js como runtime preferido/);
+  assert.match(effective, /comprueba herramientas ZIP/);
+  assert.match(effective, /pide autorización para instalarla localmente/);
+  assert.match(effective, /No finalices solo diciendo que no puedes/);
+  assert.match(effective, /nunca consultes bases de datos/);
   assert.match(effective, /informa al usuario de la ruta y los pasos manuales/);
   assert.equal(readFileSync(options.globalSource, "utf8"), "\uFEFFGlobal guidance");
   assert.equal(readFileSync(options.projectSource, "utf8"), "Project guidance");

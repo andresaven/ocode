@@ -18,6 +18,31 @@ from ocode.paths import Paths
 class OpenCodeV2DefaultsTests(unittest.TestCase):
     defaults = Path(__file__).resolve().parents[1] / "defaults"
 
+    def test_global_instructions_require_docx_skill_for_word_tasks(self):
+        instructions = (self.defaults / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("carga primero la skill `docx`", instructions)
+        self.assertIn("utiliza Node.js como runtime preferido", instructions)
+        self.assertIn("pide autorización para instalarla localmente", instructions)
+        self.assertIn("No finalices solo diciendo que no puedes", instructions)
+
+    def test_docx_skill_advertises_read_and_compare_and_prefers_node(self):
+        skill = (self.defaults / "skills" / "docx" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "Read, extract, compare, create, or edit Word DOCX documents", skill
+        )
+        self.assertIn("Prefer Node.js for every DOCX operation", skill)
+        self.assertIn("missing `mammoth` or `docx` npm packages", skill)
+        self.assertIn(
+            "archive tools such as `unzip`, `7z`/`7zz`, or `bsdtar`", skill
+        )
+        self.assertIn("If no suitable Node method is available", skill)
+        self.assertIn(
+            "ask the user for explicit permission to install it locally", skill
+        )
+        self.assertIn("never install silently or globally", skill)
+
     def test_global_defaults_use_v2_permissions_and_preserve_properties_deny(self):
         config = (self.defaults / "opencode.jsonc").read_text(encoding="utf-8")
         self.assertIn('"permissions": [', config)

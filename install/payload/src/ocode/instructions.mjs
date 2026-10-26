@@ -18,6 +18,10 @@ export function syncInstructions({ globalSource, projectSource, target, onError 
       "Para instalar skills en esta instancia, usa /etc/ocode/project-skills/<id>/SKILL.md, fuera de /workspace; incluye las skills de las que dependa. " +
       "No instales skills en /workspace ni en .opencode/skills del repositorio como sustituto. " +
       "Las skills globales están montadas en solo lectura: indica al usuario que debe colocarlas en config/skills/<id>/SKILL.md del host. " +
+      "Para cualquier tarea con documentos Word (.docx), carga primero la skill docx con ID exacto docx mediante la herramienta skill; aplica a leer, extraer, comparar, crear, editar y validar. " +
+      "En contenedores ocode, usa Node.js como runtime preferido y comprueba herramientas Node antes de concluir que no puedes leer un DOCX porque falte Python o el lector directo no lo admita. " +
+      "Si la skill no está disponible, detente e informa. Si no hay una herramienta Node adecuada, comprueba herramientas ZIP; si tampoco hay, identifica la dependencia Node mínima y pide autorización para instalarla localmente. No finalices solo diciendo que no puedes ni instales dependencias o cambies de runtime sin autorización. " +
+      "Para contrastar documentos con código, limita la inspección al apartado solicitado y al código pertinente; nunca consultes bases de datos. " +
       "Si las reglas o los permisos impiden escribir en la ruta específica, no busques otra vía: informa al usuario de la ruta y los pasos manuales, sin afirmar que quedaron instaladas.";
     if (contents === previous) return;
     mkdirSync(dirname(target), { recursive: true });

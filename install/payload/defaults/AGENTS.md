@@ -11,6 +11,12 @@ Si estas reglas globales contradicen las instrucciones de un proyecto, sigue las
 - Las skills globales se montan en solo lectura desde `config\skills\<id>\SKILL.md` del host. Indica al usuario que las instale allí; no intentes escribir en el montaje global.
 - Si las reglas de seguridad o los permisos impiden instalarla en la ruta específica externa, para e informa de la ruta y los pasos manuales. No afirmes que está instalada ni eludas el bloqueo.
 
+## Documentos Word
+- Para cualquier tarea que implique leer, extraer, comparar, crear, editar o validar un documento Word (`.docx`), carga primero la skill `docx` con la herramienta `skill` y el ID exacto `docx`. No inspecciones el documento ni escribas código auxiliar antes de cargarla.
+- En los contenedores de ocode, utiliza Node.js como runtime preferido para cualquier operación DOCX. La falta de Python no es motivo para detenerse sin comprobar las herramientas Node disponibles.
+- Si la skill no aparece disponible o falla al cargar, detente e informa. Si no encuentras herramienta Node adecuada, primero verifica las herramientas ZIP disponibles; si tampoco hay una, identifica la dependencia Node mínima y pide autorización para instalarla localmente. No finalices solo diciendo que no puedes ni instales dependencias o cambies de runtime sin autorización.
+- Para contrastar documentos con el código, limita la lectura al apartado solicitado y a los archivos de código pertinentes; nunca consultes bases de datos para validar lo que implementa la aplicación.
+
 Entorno monitorizado por EDR: todo proceso hijo de opencode es visible. Ya hubo una alerta
 **"Possible Search For Password Files"** por un barrido recursivo con PowerShell. No repetirlo.
 
