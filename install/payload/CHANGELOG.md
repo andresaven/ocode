@@ -1,5 +1,9 @@
 # Cambios
 
+## 0.11.3
+
+- OpenCode puede leer y editar `/tmp/` y sus subdirectorios dentro del contenedor.
+
 ## 0.11.2
 
 - La skill `docx` debe cargarse para cualquier operación Word y ahora define
