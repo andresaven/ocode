@@ -1,6 +1,6 @@
 # Cambios
 
-## Próxima versión
+## 0.11.2
 
 - La skill `docx` debe cargarse para cualquier operación Word y ahora define
   un flujo Node explícito para extraer contenido y contrastarlo con código.
