@@ -41,7 +41,7 @@ para y pregunta al usuario.
   Ficheros grandes: por rangos.
 - Análisis amplio ("revisa todo el código", auditorías, migraciones masivas): no lo hagas por
   tu cuenta; propón un plan por partes y espera confirmación.
-- Nunca fuera del repo: ni rutas del sistema, ni el home, ni otros repositorios.
+- Nunca fuera del repo, salvo `/tmp/` del contenedor cuando la tarea lo requiera explícitamente: no accedas a otras rutas del sistema, al home ni a otros repositorios.
 
 ## Palabras clave peligrosas
 No las uses como patrón de `Grep`, nombre de `Glob` ni argumento de comando:
