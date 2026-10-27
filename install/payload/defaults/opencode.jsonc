@@ -19,6 +19,7 @@
 
     // Lectura.
     { "action": "read", "resource": "*", "effect": "allow" },
+    { "action": "read", "resource": "/tmp/**", "effect": "allow" },
     { "action": "read", "resource": "*src/main/resources/application-desa.yaml*", "effect": "deny" },
     { "action": "read", "resource": "*src/main/resources/application-pre.yaml*", "effect": "deny" },
     { "action": "read", "resource": "*src/main/resources/application-pro.yaml*", "effect": "deny" },
@@ -66,6 +67,7 @@
 
     // Edición.
     { "action": "edit", "resource": "*", "effect": "allow" },
+    { "action": "edit", "resource": "/tmp/**", "effect": "allow" },
     { "action": "edit", "resource": "*src/main/resources/application-desa.yaml*", "effect": "deny" },
     { "action": "edit", "resource": "*src/main/resources/application-pre.yaml*", "effect": "deny" },
     { "action": "edit", "resource": "*src/main/resources/application-pro.yaml*", "effect": "deny" },
