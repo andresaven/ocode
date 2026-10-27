@@ -23,12 +23,22 @@ except ImportError:  # pragma: no cover - depends on the environment
 TEXTUAL_AVAILABLE = UpdateScreen is not None and OcodeApp is not None
 
 
-def build_archive(path: Path, *, top: str = "ocode-0.7.0", complete: bool = True) -> Path:
+def build_archive(
+    path: Path,
+    *,
+    top: str = "ocode-0.7.0",
+    complete: bool = True,
+    version: str = "0.7.0",
+) -> Path:
     with zipfile.ZipFile(path, "w") as bundle:
         bundle.writestr(f"{top}/install/install.cmd", "@echo off\r\n")
         bundle.writestr(f"{top}/install/install.py", "# installer\n")
         bundle.writestr(
             f"{top}/install/payload/pyproject.toml", '[project]\nname = "ocode"\n'
+        )
+        bundle.writestr(
+            f"{top}/install/payload/src/ocode/__init__.py",
+            f'__version__ = "{version}"\n',
         )
         if complete:
             bundle.writestr(f"{top}/install/payload/src/ocode/__main__.py", "")
@@ -155,6 +165,20 @@ class StageUpdateTests(unittest.TestCase):
             with self.assertRaises(UpdateError):
                 self.stage(home, archive)
             self.assertFalse((home / "install").exists())
+
+    def test_archive_version_mismatch_is_rejected_before_replacing_install(self):
+        with TemporaryDirectory() as directory:
+            home = Path(directory)
+            install = home / "install"
+            install.mkdir()
+            marker = install / "keep.txt"
+            marker.write_text("previous install", encoding="utf-8")
+            archive = build_archive(home / "download.zip", version="0.6.9")
+
+            with self.assertRaisesRegex(UpdateError, "incluye ocode 0.6.9"):
+                self.stage(home, archive)
+
+            self.assertEqual(marker.read_text(encoding="utf-8"), "previous install")
 
     def test_extract_rejects_path_traversal(self):
         with TemporaryDirectory() as directory:

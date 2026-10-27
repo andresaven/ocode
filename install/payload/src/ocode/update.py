@@ -18,6 +18,10 @@ USER_AGENT = "ocode-updater"
 TIMEOUT_SECONDS = 15
 
 _VERSION_RE = re.compile(r"^[vV]?(\d+(?:\.\d+)*)")
+_PACKAGE_VERSION_RE = re.compile(
+    r"^__version__\s*=\s*['\"]([^'\"]+)['\"]\s*$",
+    re.MULTILINE,
+)
 
 
 class UpdateError(RuntimeError):
@@ -196,18 +200,28 @@ def _distribution_root(extracted: Path) -> Path:
     return extracted
 
 
-def _validate_distribution(root: Path) -> None:
+def _validate_distribution(root: Path, expected_version: str) -> None:
     required = (
         root / "install" / "install.cmd",
         root / "install" / "install.py",
         root / "install" / "payload" / "pyproject.toml",
         root / "install" / "payload" / "src" / "ocode" / "__main__.py",
+        root / "install" / "payload" / "src" / "ocode" / "__init__.py",
     )
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise UpdateError(
             "El paquete descargado no contiene la distribución esperada:\n"
             + "\n".join(missing)
+        )
+
+    version_path = root / "install" / "payload" / "src" / "ocode" / "__init__.py"
+    match = _PACKAGE_VERSION_RE.search(version_path.read_text(encoding="utf-8"))
+    if match is None or match.group(1) != expected_version:
+        included = match.group(1) if match is not None else "desconocida"
+        raise UpdateError(
+            f"La actualización anuncia ocode {expected_version}, pero el paquete "
+            f"incluye ocode {included}. No se ha instalado."
         )
 
 
@@ -244,7 +258,7 @@ def stage_update(release: Release, home: Path) -> Path:
         extracted.mkdir()
         _extract(archive, extracted)
         root = _distribution_root(extracted)
-        _validate_distribution(root)
+        _validate_distribution(root, release.version)
         _replace_install(root / "install", home / "install")
         readme = root / "README.md"
         if readme.is_file():
