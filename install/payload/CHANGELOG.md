@@ -1,12 +1,11 @@
 # Cambios
 
-## 0.12.0
+## 0.12.1
 
-- Al actualizar ocode, se puede revisar el diff y elegir si se reemplazan los
-  archivos generales `AGENTS.md` y `opencode.jsonc`; los archivos reemplazados
-  conservan una copia de seguridad.
-- La configuración predeterminada permite explícitamente leer y editar bajo
-  `/tmp/`.
+- Corregir la versión incluida en el paquete para que el actualizador reconozca
+  la instalación y no vuelva a ofrecer la misma actualización.
+- El actualizador comprueba que la versión anunciada coincida con la del paquete
+  antes de instalarlo.
 
 ## 0.11.3
 
