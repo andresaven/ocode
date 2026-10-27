@@ -1,5 +1,12 @@
 # Cambios
 
+## 0.12.1
+
+- Corregir la versión incluida en el paquete para que el actualizador reconozca
+  la instalación y no vuelva a ofrecer la misma actualización.
+- El actualizador comprueba que la versión anunciada coincida con la del paquete
+  antes de instalarlo.
+
 ## 0.11.3
 
 - OpenCode puede leer y editar `/tmp/` y sus subdirectorios dentro del contenedor.
