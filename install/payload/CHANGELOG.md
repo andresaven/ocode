@@ -1,5 +1,13 @@
 # Cambios
 
+## 0.12.0
+
+- Al actualizar ocode, se puede revisar el diff y elegir si se reemplazan los
+  archivos generales `AGENTS.md` y `opencode.jsonc`; los archivos reemplazados
+  conservan una copia de seguridad.
+- La configuración predeterminada permite explícitamente leer y editar bajo
+  `/tmp/`.
+
 ## 0.11.3
 
 - OpenCode puede leer y editar `/tmp/` y sus subdirectorios dentro del contenedor.
