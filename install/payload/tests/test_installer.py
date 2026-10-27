@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from unittest.mock import patch
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,6 +42,54 @@ class UpdateLauncherTests(unittest.TestCase):
 
             self.assertIn("call", launcher.read_text(encoding="ascii"))
             self.assertEqual(rules.read_text(encoding="utf-8"), "custom rules")
+
+
+class ConfigUpdateTests(unittest.TestCase):
+    def test_declining_update_preserves_custom_config(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ocode-config-") as directory:
+            root = Path(directory)
+            source = root / "default.jsonc"
+            target = root / "config.jsonc"
+            source.write_text('{"value": "new"}\n', encoding="utf-8")
+            target.write_text('{"value": "custom"}\n', encoding="utf-8")
+
+            with patch("builtins.input", return_value="n"):
+                replaced = installer.offer_config_update(source, target)
+
+            self.assertFalse(replaced)
+            self.assertEqual(target.read_text(encoding="utf-8"), '{"value": "custom"}\n')
+            self.assertEqual(list(root.glob("*.bak-*")), [])
+
+    def test_confirmed_update_shows_diff_and_keeps_backup(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ocode-config-") as directory:
+            root = Path(directory)
+            source = root / "default.jsonc"
+            target = root / "config.jsonc"
+            source.write_text('{"value": "new"}\n', encoding="utf-8")
+            target.write_text('{"value": "custom"}\n', encoding="utf-8")
+
+            with patch("builtins.input", return_value="s"):
+                replaced = installer.offer_config_update(source, target)
+
+            self.assertTrue(replaced)
+            self.assertEqual(target.read_text(encoding="utf-8"), '{"value": "new"}\n')
+            backups = list(root.glob("config.jsonc.bak-*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), '{"value": "custom"}\n')
+
+    def test_unchanged_config_does_not_prompt(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ocode-config-") as directory:
+            root = Path(directory)
+            source = root / "default.jsonc"
+            target = root / "config.jsonc"
+            source.write_text('{"value": "same"}\n', encoding="utf-8")
+            target.write_text('{"value": "same"}\n', encoding="utf-8")
+
+            with patch("builtins.input") as prompt:
+                replaced = installer.offer_config_update(source, target)
+
+            self.assertFalse(replaced)
+            prompt.assert_not_called()
 
 
 class AppLauncherTests(unittest.TestCase):

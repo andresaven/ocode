@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import difflib
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -109,6 +111,54 @@ def validate_distribution(payload: Path) -> None:
             "Distribution incomplete. Missing required files:\n"
             f"{detail}"
         )
+
+
+def offer_config_update(source: Path, target: Path) -> bool:
+    """Ask before replacing a customized global config and show its diff."""
+    if not target.is_file():
+        shutil.copy2(source, target)
+        log(f"Created config\\{target.name}")
+        return True
+
+    old_text = target.read_text(encoding="utf-8", errors="replace").splitlines()
+    new_text = source.read_text(encoding="utf-8", errors="replace").splitlines()
+    diff = list(difflib.unified_diff(
+        old_text,
+        new_text,
+        fromfile=f"config/{target.name} (actual)",
+        tofile=f"defaults/{target.name} (nuevo)",
+        lineterm="",
+    ))
+    if not diff:
+        log(f"Config\\{target.name} ya coincide con el default")
+        return False
+
+    print()
+    print("=" * 76)
+    print(f"REVISIÓN DE CONFIGURACIÓN GENERAL: {target.name}")
+    print("Si aceptas, se perderán los cambios personalizados de este archivo.")
+    print("Se guardará una copia de seguridad antes de reemplazarlo.")
+    print("-" * 76)
+    print("\n".join(diff))
+    print("=" * 76)
+    try:
+        answer = input(f"¿Reemplazar config/{target.name} por el nuevo default? [s/N]: ")
+    except (EOFError, OSError):
+        answer = ""
+    if answer.strip().lower() not in ("s", "si", "sí"):
+        log(f"Se conserva config\\{target.name}")
+        return False
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = target.with_name(f"{target.name}.bak-{timestamp}")
+    suffix = 1
+    while backup.exists():
+        backup = target.with_name(f"{target.name}.bak-{timestamp}-{suffix}")
+        suffix += 1
+    shutil.copy2(target, backup)
+    shutil.copy2(source, target)
+    log(f"Actualizada config\\{target.name}; copia anterior: {backup.name}")
+    return True
 
 
 def create_update_launcher(root: Path) -> Path:
@@ -223,12 +273,7 @@ def main() -> int:
     for name in ("AGENTS.md", "opencode.jsonc"):
         source = defaults / name
         target = config / name
-
-        if target.exists():
-            log(f"Keeping existing config\\{name}")
-        else:
-            shutil.copy2(source, target)
-            log(f"Created config\\{name}")
+        offer_config_update(source, target)
 
     if add_user_path(bin_dir):
         log(f"Added to user PATH: {bin_dir}")
