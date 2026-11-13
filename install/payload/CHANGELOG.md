@@ -1,6 +1,6 @@
 # Cambios
 
-## Sin publicar
+## 0.13.0
 
 - Cada instancia guarda su versión de OpenCode en `project.json`
   (`opencode_version`). La versión global de `config.json` es el valor por
@@ -34,69 +34,6 @@
 - Antes de actualizar, el diálogo de todas las instancias y la confirmación
   muestran las novedades publicadas de la versión elegida y un botón **Abrir
   cambios**; si no hay notas, abre la página de releases.
-
-## 0.12.3
-
-- OpenCode Console (`opencode/<modelo>`) y OpenCode Go (`opencode-go/<modelo>`)
-  tienen claves independientes: Console conserva `OPENCODE_API_KEY` y Go pasa a
-  `OPENCODE_GO_API_KEY`, con ficheros `opencode-console.env` y
-  `opencode-go.env`.
-- OpenCode Console puede usarse sin clave en modo gratuito; con clave, el uso se
-  atribuye a la cuenta y se habilitan los modelos de pago. Es independiente de
-  OpenCode Go.
-- Se añade OpenRouter como proveedor (`openrouter/<modelo>`, variable
-  `OPENROUTER_API_KEY`, fichero `openrouter.env`), independiente de OpenAI.
-- Al actualizar, la clave existente de OpenCode Go se migra a la nueva variable
-  y la configuración global recibe `providers.opencode-go.env` aunque ya tuviera
-  un bloque `providers`. Se guarda una copia
-  `opencode.jsonc.bak-pre-0.12.2` antes de modificarla.
-- La huella de la clave incluye el nombre de la variable: los contenedores
-  creados antes del cambio se marcan como desactualizados.
-- Diagnóstico y Proveedores muestran la separación Console/Go y, si no se pudo
-  aplicar, el bloque exacto que hay que añadir a `config\opencode.jsonc`.
-- Un proyecto cuyo `opencode.jsonc` declara `providers` puede anular la
-  separación Console/Go; Diagnóstico lo avisa.
-
-## 0.12.2
-
-- Con Docker vía WSL, mantener una sesión propia mientras haya instancias de
-  ocode activas y liberarla automáticamente al detenerse la última.
-
-## 0.12.1
-
-- Corregir la versión incluida en el paquete para que el actualizador reconozca
-  la instalación y no vuelva a ofrecer la misma actualización.
-- El actualizador comprueba que la versión anunciada coincida con la del paquete
-  antes de instalarlo.
-
-## 0.11.3
-
-- OpenCode puede leer y editar `/tmp/` y sus subdirectorios dentro del contenedor.
-
-## 0.11.2
-
-- La skill `docx` debe cargarse para cualquier operación Word y ahora define
-  un flujo Node explícito para extraer contenido y contrastarlo con código.
-  La instrucción efectiva del contenedor también exige cargarla antes de actuar.
-- La extracción DOCX no se considera imposible solo porque falten los paquetes
-  `mammoth` o `docx`; la skill comprueba también herramientas ZIP disponibles.
-- Si no hay una vía Node lista, las instrucciones efectivas exigen ofrecer la
-  instalación autorizada de una dependencia local antes de abandonar la tarea.
-
-## 0.11.1
-
-- La skill `docx` prioriza Node.js en los contenedores, conserva el estilo del
-  documento original y respeta las rutas de trabajo indicadas por el usuario.
-
-## 0.11.0
-
-- Las skills incluidas en `defaults/skills/<id>/SKILL.md` se instalan en las
-  skills globales al inicializar ocode, sin sobrescribir las personalizaciones
-  existentes del usuario.
-- Los defaults de OpenCode usan el formato nativo V2 de permisos; se conserva
-  el bloqueo de lectura de archivos `.properties`.
-- La skill `grilling` presenta las preguntas de cada ronda mediante un diálogo
-  modal en lugar de formularios de texto plano.
 
 - Los runtimes Java incluyen Subversion (`svn`) y Python 3 (`python3`),
   instalados con `apk` al construir la imagen.
@@ -237,5 +174,3 @@
   y no adquieren acceso Web automáticamente.
 - Pruebas de regresión para concurrencia, colisiones no destructivas, cierre
   del cliente y operaciones limitadas a la instancia seleccionada.
-""", "path">
-C:\entorno_desarrollo\ocode\install\payload\CHANGELOG.md
