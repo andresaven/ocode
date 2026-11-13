@@ -16,6 +16,8 @@ from ocode.tui import (
     JavaScreen,
     MessageScreen,
     OcodeApp,
+    OpenCodeVersionScreen,
+    OpenCodeUpdateAllScreen,
     ProjectScreen,
     ProjectSettingsScreen,
     SensitivePathsScreen,
@@ -93,6 +95,21 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
         ports = patch("ocode.tui.published_port_owners", return_value={})
         self.port_owners_mock = ports.start()
         self.addCleanup(ports.stop)
+        version = patch("ocode.tui.container_opencode_version", return_value="")
+        self.opencode_version_mock = version.start()
+        self.addCleanup(version.stop)
+        latest = patch(
+            "ocode.tui.list_remote_versions",
+            return_value=["2.2.7", "2.0.24"],
+        )
+        self.list_remote_mock = latest.start()
+        self.addCleanup(latest.stop)
+        notes = patch(
+            "ocode.tui.release_summary",
+            return_value=("", "https://github.com/anomalyco/opencode/releases"),
+        )
+        self.release_summary_mock = notes.start()
+        self.addCleanup(notes.stop)
         cfg = GlobalConfig.defaults()
         cfg.container_runtime = ContainerRuntime(kind="docker")
         cfg.check_updates = False
@@ -110,7 +127,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 table = app.screen.query_one("#projects")
                 self.assertEqual(
-                    table.get_cell_at(Coordinate(0, 3)),
+                    table.get_cell_at(Coordinate(0, 4)),
                     "Detenida",
                 )
 
@@ -124,7 +141,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 app.store.list_projects.return_value = [added, project]
                 await app.screen.refresh_instance_statuses().wait()
                 table = app.screen.query_one("#projects")
-                self.assertEqual(table.get_cell_at(Coordinate(0, 3)), "Detenida")
+                self.assertEqual(table.get_cell_at(Coordinate(0, 4)), "Detenida")
                 status.assert_called_with(app.global_cfg, project.container_name)
 
     async def test_main_screen_shows_project_created_while_adding(self):
@@ -142,7 +159,8 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 table = app.screen.query_one("#projects")
                 self.assertEqual(table.row_count, 2)
                 self.assertEqual(table.get_row("added")[0], "Nuevo")
-                self.assertEqual(table.get_row("added")[3], "Sin iniciar")
+                self.assertEqual(table.get_row("added")[3], "2.0.24")
+                self.assertEqual(table.get_row("added")[4], "Sin iniciar")
 
     async def test_main_screen_updates_port_after_returning_from_settings(self):
         app = self.make_app()
@@ -150,13 +168,51 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
             async with app.run_test() as pilot:
                 await pilot.pause()
                 table = app.screen.query_one("#projects")
-                self.assertEqual(table.get_row("demo")[4], "4096")
+                self.assertEqual(table.get_row("demo")[5], "4096")
                 app.open_project("demo")
                 await pilot.pause()
                 app.store.get_project.return_value.port = 4101
                 app.pop_screen()
                 await pilot.pause()
-                self.assertEqual(table.get_row("demo")[4], "4101")
+                self.assertEqual(table.get_row("demo")[5], "4101")
+
+    async def test_main_screen_shows_the_pinned_opencode_version(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        project.opencode_version = "2.2.5"
+        app.global_cfg.opencode_version = "2.2.7"
+        with patch("ocode.tui.container_status", return_value="exited"):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                table = app.screen.query_one("#projects")
+                self.assertEqual(table.get_row("demo")[3], "2.2.5")
+
+    async def test_main_screen_reconciles_the_version_with_the_container(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        project.opencode_version = "2.2.5"
+        self.opencode_version_mock.return_value = "2.0.24"
+        with patch("ocode.tui.container_status", return_value="exited"):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await app.screen.workers.wait_for_complete()
+                table = app.screen.query_one("#projects")
+                self.assertEqual(table.get_row("demo")[3], "2.0.24")
+                self.assertEqual(project.opencode_version, "2.0.24")
+                app.store.save_project.assert_called_with(project)
+
+    async def test_instance_screen_reconciles_the_version_with_the_container(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        project.opencode_version = "2.2.5"
+        self.opencode_version_mock.return_value = "2.0.24"
+        with patch("ocode.tui.container_status", return_value="exited"):
+            async with app.run_test() as pilot:
+                app.push_screen(ProjectScreen("demo"))
+                await pilot.pause()
+                await app.screen.workers.wait_for_complete()
+                self.assertEqual(project.opencode_version, "2.0.24")
+                app.store.save_project.assert_called_with(project)
 
     async def test_status_refresh_skips_row_removed_during_query(self):
         app = self.make_app()
@@ -466,8 +522,16 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(screen, ProjectScreen)
                 await screen.workers.wait_for_complete()
                 self.assertIn("En ejecución", str(screen.query_one("#instance-status", Static).render()))
-                self.assertEqual(len(screen.query(".action-group")), 4)
+                self.assertEqual(len(screen.query(".action-group")), 5)
                 self.assertEqual(str(screen.query_one("#tui", Button).label), "Abrir TUI")
+                self.assertEqual(
+                    str(screen.query_one("#update-opencode", Button).label),
+                    "Elegir versión…",
+                )
+                self.assertEqual(
+                    str(screen.query_one("#update-opencode-latest", Button).label),
+                    "Actualizar a la última",
+                )
                 self.assertEqual(len(screen.query("#sensitive-report")), 0)
                 self.assertEqual(len(screen.query("#open-config")), 0)
                 self.assertEqual(len(screen.query("#recreate-container")), 0)
@@ -571,6 +635,8 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                 app.push_screen(JavaScreen())
                 await pilot.pause()
                 app.screen.query_one("#default-maven-repository", Input).value = str(repository)
+                app.screen.query_one("#java-content").scroll_end(animate=False)
+                await pilot.pause()
                 await pilot.click("#save-maven")
                 await pilot.pause()
                 self.assertIsInstance(app.screen, MessageScreen)
@@ -595,6 +661,8 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
             app.push_screen(JavaScreen())
             await pilot.pause()
             app.screen.query_one("#default-maven-repository", Input).value = "/missing/repository"
+            app.screen.query_one("#java-content").scroll_end(animate=False)
+            await pilot.pause()
             await pilot.click("#save-maven")
             await pilot.pause()
             self.assertIsInstance(app.screen, MessageScreen)
@@ -604,7 +672,7 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
         app = self.make_app()
         async with app.run_test(size=(80, 24)) as pilot:
             menu = app.screen.query_one("#java", Button)
-            self.assertEqual(str(menu.label), "Java / Maven")
+            self.assertEqual(str(menu.label), "Runtimes")
             await pilot.click("#java")
             await pilot.pause()
             screen = app.screen
@@ -616,6 +684,491 @@ class InstanceScreenTests(unittest.IsolatedAsyncioTestCase):
                             children.index(screen.query_one("#maven-section")))
             self.assertLess(children.index(screen.query_one("#build").parent),
                             children.index(screen.query_one("#maven-section")))
+
+    async def test_default_opencode_version_can_be_changed(self):
+        app = self.make_app()
+        with patch(
+            "ocode.tui.list_remote_versions",
+            return_value=["2.2.7", "2.0.24"],
+        ):
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(JavaScreen())
+                await pilot.pause()
+                await pilot.click("#change-default-version")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, OpenCodeVersionScreen)
+                app.screen.query_one("#opencode-version-input", Input).value = "v2.2.7"
+                await pilot.click("#version-apply")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                self.assertEqual(app.global_cfg.opencode_version, "2.2.7")
+                self.assertEqual(
+                    app.global_cfg.runtimes["java17"].image,
+                    "ocode-runtime:2.0.24-maven3.9.9-java17",
+                )
+                app.store.save_global.assert_called_once_with(app.global_cfg)
+
+    async def test_invalid_opencode_version_is_rejected_in_the_dialog(self):
+        app = self.make_app()
+        with patch("ocode.tui.list_remote_versions", return_value=[]):
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(JavaScreen())
+                await pilot.pause()
+                await pilot.click("#change-default-version")
+                await pilot.pause()
+                app.screen.query_one("#opencode-version-input", Input).value = "latest"
+                await pilot.click("#version-apply")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, OpenCodeVersionScreen)
+                status = str(
+                    app.screen.query_one("#versions-status", Static).render()
+                )
+                self.assertIn("no válida", status)
+                self.assertEqual(app.global_cfg.opencode_version, "2.0.24")
+                app.store.save_global.assert_not_called()
+
+    async def test_instance_opencode_update_uses_npm_and_saves(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        project.opencode_version = "2.0.24"
+        with patch(
+            "ocode.tui.update_project_opencode_version",
+            return_value="2.2.7",
+        ) as update:
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(ProjectScreen("demo"))
+                await pilot.pause()
+                app.screen.query_one("#update-opencode").scroll_visible(animate=False)
+                await pilot.pause()
+                await pilot.click("#update-opencode")
+                await pilot.pause()
+                app.screen.query_one("#opencode-version-input", Input).value = "2.2.7"
+                await pilot.click("#version-apply")
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, ConfirmScreen):
+                        break
+                self.assertIsInstance(app.screen, ConfirmScreen)
+                await pilot.click("#yes")
+                await pilot.pause()
+                screen = next(
+                    item for item in app.screen_stack
+                    if isinstance(item, ProjectScreen)
+                )
+                await screen.workers.wait_for_complete()
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, MessageScreen):
+                        break
+                self.assertIsInstance(app.screen, MessageScreen)
+                self.assertEqual(project.opencode_version, "2.2.7")
+                update.assert_called_once()
+                app.store.save_project.assert_called_once_with(project)
+
+    async def test_instance_latest_update_shows_release_notes(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        project.opencode_version = "2.0.24"
+        self.release_summary_mock.return_value = (
+            "- Novedad de prueba",
+            "https://example.test/release",
+        )
+        with patch("ocode.tui.webbrowser.open") as open_url:
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(ProjectScreen("demo"))
+                await pilot.pause()
+                app.screen.query_one("#update-opencode-latest").scroll_visible(
+                    animate=False
+                )
+                await pilot.pause()
+                await pilot.click("#update-opencode-latest")
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, ConfirmScreen):
+                        break
+                self.assertIsInstance(app.screen, ConfirmScreen)
+                self.assertIn("Novedades de OpenCode 2.2.7", app.screen.text)
+                self.assertIn("- Novedad de prueba", app.screen.text)
+                self.assertEqual(
+                    str(app.screen.query_one("#details", Button).label),
+                    "Abrir cambios",
+                )
+                await pilot.click("#details")
+                await pilot.pause()
+                open_url.assert_called_once_with(
+                    "https://example.test/release", new=2
+                )
+
+    async def test_instance_opencode_update_failure_does_not_save(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        project.opencode_version = "2.0.24"
+        with patch(
+            "ocode.tui.update_project_opencode_version",
+            side_effect=docker.DockerError("fallo de prueba"),
+        ):
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(ProjectScreen("demo"))
+                await pilot.pause()
+                app.screen.query_one("#update-opencode").scroll_visible(animate=False)
+                await pilot.pause()
+                await pilot.click("#update-opencode")
+                await pilot.pause()
+                app.screen.query_one("#opencode-version-input", Input).value = "2.2.7"
+                await pilot.click("#version-apply")
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, ConfirmScreen):
+                        break
+                self.assertIsInstance(app.screen, ConfirmScreen)
+                await pilot.click("#yes")
+                await pilot.pause()
+                screen = next(
+                    item for item in app.screen_stack
+                    if isinstance(item, ProjectScreen)
+                )
+                await screen.workers.wait_for_complete()
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, MessageScreen):
+                        break
+                self.assertIsInstance(app.screen, MessageScreen)
+                self.assertEqual(project.opencode_version, "2.0.24")
+                app.store.save_project.assert_not_called()
+
+    async def test_update_all_stops_on_first_failure(self):
+        app = self.make_app()
+        first = ProjectConfig("first", "Uno", "trunk", ".")
+        second = ProjectConfig("second", "Dos", "trunk", ".")
+        first.opencode_version = "2.0.24"
+        second.opencode_version = "2.0.24"
+        app.store.list_projects.return_value = [first, second]
+        with patch(
+            "ocode.tui.list_remote_versions",
+            return_value=["2.2.7"],
+        ), patch(
+            "ocode.tui.update_project_opencode_version",
+            side_effect=["2.2.7", docker.DockerError("fallo de prueba")],
+        ) as update, patch(
+            "ocode.tui.container_status",
+            return_value="exited",
+        ), patch(
+            "ocode.tui.npm_version_available",
+            return_value=True,
+        ):
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(JavaScreen())
+                await pilot.pause()
+                await pilot.click("#update-all-instances")
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, OpenCodeUpdateAllScreen):
+                        break
+                self.assertIsInstance(app.screen, OpenCodeUpdateAllScreen)
+                await app.screen.workers.wait_for_complete()
+                await pilot.pause()
+                await pilot.click("#version-latest")
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, (ConfirmScreen, MessageScreen)):
+                        break
+                self.assertIsInstance(app.screen, ConfirmScreen)
+                await pilot.click("#yes")
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+                self.assertIsInstance(app.screen, MessageScreen)
+                self.assertEqual(first.opencode_version, "2.2.7")
+                self.assertEqual(second.opencode_version, "2.0.24")
+                self.assertEqual(update.call_count, 2)
+                app.store.save_project.assert_called_once_with(first)
+                self.assertEqual(app.global_cfg.opencode_version, "2.0.24")
+
+    async def test_update_all_rejects_paused_instances_before_confirmation(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        project.opencode_version = "2.0.24"
+        app.store.list_projects.return_value = [project]
+        with patch(
+            "ocode.tui.list_remote_versions",
+            return_value=["2.2.7"],
+        ), patch(
+            "ocode.tui.container_status",
+            return_value="paused",
+        ), patch(
+            "ocode.tui.npm_version_available",
+            return_value=True,
+        ) as npm, patch(
+            "ocode.tui.update_project_opencode_version",
+        ) as update:
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(JavaScreen())
+                await pilot.pause()
+                await pilot.click("#update-all-instances")
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, OpenCodeUpdateAllScreen):
+                        break
+                self.assertIsInstance(app.screen, OpenCodeUpdateAllScreen)
+                await app.screen.workers.wait_for_complete()
+                await pilot.pause()
+                await pilot.click("#version-latest")
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, (ConfirmScreen, MessageScreen)):
+                        break
+                self.assertIsInstance(app.screen, MessageScreen)
+                self.assertIn("No se puede actualizar", app.screen.title_text)
+                update.assert_not_called()
+                npm.assert_not_called()
+                self.assertEqual(app.global_cfg.opencode_version, "2.0.24")
+
+    async def test_add_project_defaults_to_latest_opencode_version(self):
+        app = self.make_app()
+        async with app.run_test(size=(100, 40)) as pilot:
+            app.push_screen(AddProjectScreen())
+            await pilot.pause()
+            await app.screen.workers.wait_for_complete()
+            self.assertEqual(
+                app.screen.query_one("#opencode-version", Input).value,
+                "2.2.7",
+            )
+
+    async def test_add_project_can_use_a_manual_opencode_version(self):
+        from tempfile import TemporaryDirectory
+
+        app = self.make_app()
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(AddProjectScreen())
+                await pilot.pause()
+                await app.screen.workers.wait_for_complete()
+                screen = app.screen
+                screen.query_one("#workspace", Input).value = directory
+                screen.query_one("#opencode-version", Input).value = "2.0.24"
+                with patch.object(app, "open_project"):
+                    await pilot.click("#save")
+                    await pilot.pause()
+                self.assertEqual(
+                    app.store.create_project.call_args.kwargs["opencode_version"],
+                    "2.0.24",
+                )
+
+    async def test_main_screen_update_all_button_opens_the_dialog(self):
+        app = self.make_app()
+        self.release_summary_mock.return_value = (
+            "- Novedad de prueba",
+            "https://example.test/release",
+        )
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            await pilot.click("#opencode-all")
+            await pilot.pause()
+            for _ in range(20):
+                await pilot.pause()
+                if isinstance(app.screen, OpenCodeUpdateAllScreen):
+                    break
+            self.assertIsInstance(app.screen, OpenCodeUpdateAllScreen)
+            await app.screen.workers.wait_for_complete()
+            await pilot.pause()
+            self.assertEqual(
+                app.screen.query_one("#opencode-version-input", Input).value,
+                "2.2.7",
+            )
+            self.assertIn(
+                "- Novedad de prueba",
+                str(app.screen.query_one("#version-notes-body", Static).render()),
+            )
+            self.assertFalse(
+                any(isinstance(item, JavaScreen) for item in app.screen_stack)
+            )
+
+    async def test_runtimes_update_all_opens_the_dialog(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            app.push_screen(JavaScreen())
+            await pilot.pause()
+            app.screen.query_one("#java-content").scroll_end(animate=False)
+            await pilot.pause()
+            app.screen.query_one("#update-all-instances").scroll_visible(
+                animate=False
+            )
+            await pilot.pause()
+            await pilot.click("#update-all-instances")
+            await pilot.pause()
+            for _ in range(20):
+                await pilot.pause()
+                if isinstance(app.screen, OpenCodeUpdateAllScreen):
+                    break
+            self.assertIsInstance(app.screen, OpenCodeUpdateAllScreen)
+            self.assertEqual(
+                app.screen.title_text,
+                "Actualizar OpenCode en todas las instancias",
+            )
+
+    async def test_update_all_dialog_can_choose_a_concrete_version(self):
+        app = self.make_app()
+        project = app.store.get_project.return_value
+        project.opencode_version = "2.2.7"
+        app.store.list_projects.return_value = [project]
+        with patch(
+            "ocode.tui.container_status",
+            return_value="exited",
+        ), patch(
+            "ocode.tui.npm_version_available",
+            return_value=True,
+        ):
+            async with app.run_test(size=(100, 40)) as pilot:
+                app.push_screen(JavaScreen())
+                await pilot.pause()
+                await pilot.click("#update-all-instances")
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, OpenCodeUpdateAllScreen):
+                        break
+                self.assertIsInstance(app.screen, OpenCodeUpdateAllScreen)
+                await app.screen.workers.wait_for_complete()
+                await pilot.pause()
+                app.screen.query_one("#opencode-version-input", Input).value = (
+                    "2.2.5"
+                )
+                await pilot.click("#version-selected")
+                await pilot.pause()
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, ConfirmScreen):
+                        break
+                self.assertIsInstance(app.screen, ConfirmScreen)
+                self.assertIn("OpenCode a 2.2.5", app.screen.text)
+
+    async def test_update_all_dialog_notes_follow_the_selected_version(self):
+        app = self.make_app()
+        self.release_summary_mock.side_effect = lambda version: (
+            f"- Notas {version}",
+            f"https://example.test/{version}",
+        )
+        async with app.run_test(size=(100, 40)) as pilot:
+            app.push_screen(
+                OpenCodeUpdateAllScreen(project_count=1, reserve="2.0.24")
+            )
+            await pilot.pause()
+            await app.screen.workers.wait_for_complete()
+            await pilot.pause()
+            app.screen.on_version_selected("2.0.24")
+            await app.screen.workers.wait_for_complete()
+            await pilot.pause()
+            screen = app.screen
+            self.assertIn(
+                "- Notas 2.0.24",
+                str(screen.query_one("#version-notes-body", Static).render()),
+            )
+            self.assertEqual(
+                str(screen.query_one("#version-notes-open", Button).label),
+                "Abrir cambios",
+            )
+
+    async def test_update_all_dialog_shows_missing_notes_fallback(self):
+        app = self.make_app()
+        self.release_summary_mock.return_value = (
+            "",
+            "https://github.com/anomalyco/opencode/releases",
+        )
+        async with app.run_test(size=(100, 40)) as pilot:
+            app.push_screen(
+                OpenCodeUpdateAllScreen(project_count=1, reserve="2.0.24")
+            )
+            await pilot.pause()
+            await app.screen.workers.wait_for_complete()
+            await pilot.pause()
+            screen = app.screen
+            self.assertIn(
+                "No hay notas publicadas",
+                str(screen.query_one("#version-notes-body", Static).render()),
+            )
+            self.assertEqual(
+                str(screen.query_one("#version-notes-open", Button).label),
+                "Abrir releases",
+            )
+
+    async def test_runtimes_action_buttons_fit_on_small_screen(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 24)) as pilot:
+            app.push_screen(JavaScreen())
+            await pilot.pause()
+            for selector in ("#change-default-version", "#update-all-instances"):
+                button = app.screen.query_one(selector, Button)
+                self.assertEqual(button.region.height, 3)
+
+    async def test_update_all_dialog_actions_are_visible_on_small_screen(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 20)) as pilot:
+            app.push_screen(
+                OpenCodeUpdateAllScreen(project_count=2, reserve="2.0.24")
+            )
+            await pilot.pause()
+            await app.screen.workers.wait_for_complete()
+            await pilot.pause()
+            for selector in (
+                "#version-latest",
+                "#version-selected",
+                "#version-cancel",
+            ):
+                button = app.screen.query_one(selector, Button)
+                self.assertEqual(button.region.height, 3)
+                self.assertLessEqual(
+                    button.region.y + button.region.height,
+                    app.size.height,
+                )
+                self.assertLessEqual(
+                    button.region.x + button.region.width,
+                    app.size.width,
+                )
+
+    async def test_version_dialog_action_is_visible_on_small_screen(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 20)) as pilot:
+            app.push_screen(
+                OpenCodeVersionScreen(
+                    current="2.2.7",
+                    title="Actualizar OpenCode",
+                    action="Actualizar",
+                    note="Prueba",
+                )
+            )
+            await pilot.pause()
+            await app.screen.workers.wait_for_complete()
+            await pilot.pause()
+            button = app.screen.query_one("#version-apply", Button)
+            self.assertLessEqual(
+                button.region.y + button.region.height,
+                app.size.height,
+            )
+
+    async def test_confirmation_button_is_visible_on_small_screen(self):
+        app = self.make_app()
+        async with app.run_test(size=(80, 20)) as pilot:
+            app.push_screen(
+                ConfirmScreen(
+                    "\n".join(f"linea {index}" for index in range(20)),
+                    confirm_label="Actualizar",
+                )
+            )
+            await pilot.pause()
+            button = app.screen.query_one("#yes", Button)
+            self.assertLessEqual(
+                button.region.y + button.region.height,
+                app.size.height,
+            )
 
     async def test_add_project_suggests_first_unassigned_port(self):
         app = self.make_app()

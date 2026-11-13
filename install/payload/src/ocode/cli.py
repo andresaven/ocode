@@ -6,8 +6,10 @@ import sys
 from . import __version__
 from .docker import (
     DockerError,
+    apply_project_opencode_version,
     build_launch_command,
     build_runtime,
+    launch_detached,
     launch_foreground,
     sensitive_applied_paths,
 )
@@ -73,6 +75,12 @@ def run_tui(store: Store, paths: Paths) -> int:
             )
             if preview.foreground_args is not None:
                 print(f"[ocode] TUI: contenedor={preview.foreground_args[-4]}", flush=True)
+            if preview.args:
+                # Create the container first so the pinned OpenCode version can
+                # be applied before the TUI client attaches.
+                launch_detached(preview)
+                apply_project_opencode_version(cfg, project)
+                preview.args = []
             rc = launch_foreground(preview)
         except DockerError as exc:
             print(f"Error: {exc}", file=sys.stderr)
@@ -94,6 +102,10 @@ def main() -> int:
     cfg = store.initialize()
 
     if args.command == "doctor":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
         print(doctor(paths, cfg, store.list_projects()))
         return 0
 

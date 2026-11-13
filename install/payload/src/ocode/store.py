@@ -6,8 +6,14 @@ import shutil
 import uuid
 from pathlib import Path
 
-from . import providers
-from .model import GlobalConfig, ProjectConfig, SensitivePathsError
+from . import docker, providers
+from .model import (
+    GlobalConfig,
+    OpenCodeVersionError,
+    ProjectConfig,
+    SensitivePathsError,
+    normalize_opencode_version,
+)
 from .paths import Paths
 
 SENSITIVE_PERMISSION_PATTERNS = ['*src/main/resources/configuration/des*', '*src/main/resources/configuration/pre*', '*src/main/resources/configuration/prod*', '*src/main/resources/certs*', '*src/main/resources/application-desa.yaml*', '*src/main/resources/application-pre.yaml*', '*src/main/resources/application-pro.yaml*', '*src/main/resources/db/production*', '*src/main/resources/db/db.changelog-desa.yaml*', '*src/main/resources/db/db.changelog-pre.yaml*', '*src/main/resources/db/liquibase-desa.properties*', '*src/main/resources/db/liquibase-pre.properties*', '*k8s*']
@@ -667,6 +673,19 @@ class Store:
         for project in self.list_projects():
             self.paths.project_skills(project.project_id).mkdir(parents=True, exist_ok=True)
             changed = not self.paths.project_sensitive_paths(project.project_id).exists()
+            if not project.opencode_version:
+                detected = docker.container_package_version(
+                    cfg, project.container_name
+                )
+                try:
+                    project.opencode_version = (
+                        normalize_opencode_version(detected)
+                        if detected
+                        else cfg.opencode_version
+                    )
+                except OpenCodeVersionError:
+                    project.opencode_version = cfg.opencode_version
+                changed = True
             migrated: list[str] = []
 
             for value in project.sensitive_paths:
@@ -748,6 +767,7 @@ class Store:
         port: int,
         maven_repository: str = "",
         build_paths: list[str] | None = None,
+        opencode_version: str | None = None,
     ) -> ProjectConfig:
         if not 1 <= port <= 65535:
             raise ValueError("Puerto no válido (1–65535).")
@@ -767,6 +787,9 @@ class Store:
                 "show_agent": global_cfg.web_show_agent,
                 "color_scheme": global_cfg.web_color_scheme,
             },
+            opencode_version=normalize_opencode_version(
+                opencode_version or global_cfg.opencode_version
+            ),
             sensitive_paths=list(BUILTIN_SENSITIVE_PATHS),
         )
 

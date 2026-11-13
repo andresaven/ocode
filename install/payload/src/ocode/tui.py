@@ -35,11 +35,13 @@ from . import __version__
 from . import providers
 from .docker import (
     DockerError,
+    apply_project_opencode_version,
     build_launch_command,
     build_runtime,
     container_exit_report,
     container_exists,
     container_logs,
+    container_opencode_version,
     container_published_ports,
     published_port_owners,
     container_running,
@@ -57,14 +59,28 @@ from .docker import (
     sensitive_mount_report,
     stale_providers,
     stop_container,
+    update_project_opencode_version,
     validate_build_paths,
 )
 from .doctor import doctor
 from .storage import container_directories, storage_report
-from .model import ProjectConfig, format_build_paths, parse_build_paths, next_project_port
+from .model import (
+    ProjectConfig,
+    format_build_paths,
+    next_project_port,
+    normalize_opencode_version,
+    parse_build_paths,
+)
 from .paths import Paths
 from .store import Store, provider_env_snippet, provider_env_status
 from .update import Release, check_for_update, stage_update
+from .versions import (
+    RELEASES_PAGE,
+    VersionListError,
+    list_remote_versions,
+    npm_version_available,
+    release_summary,
+)
 
 
 @dataclass
@@ -204,26 +220,47 @@ class ConfirmScreen(ModalScreen[bool]):
         width: 85%;
         height: auto;
         max-height: 90%;
-        overflow-y: auto;
         border: round $warning;
         padding: 1 2;
         background: $surface;
+    }
+    #confirm-text {
+        height: auto;
+        max-height: 10;
+        overflow-y: auto;
     }
     #confirm Horizontal { height: 3; }
     #confirm Button { width: auto; }
     """
 
-    def __init__(self, text: str, confirm_label: str = "Confirmar"):
+    def __init__(
+        self,
+        text: str,
+        confirm_label: str = "Confirmar",
+        details_url: str | None = None,
+    ):
         super().__init__()
         self.text = text
         self.confirm_label = confirm_label
+        self.details_url = details_url
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm"):
-            yield Static(self.text)
+            with VerticalScroll(id="confirm-text"):
+                yield Static(self.text, markup=False)
             with Horizontal():
+                if self.details_url:
+                    yield Button("Abrir cambios", id="details")
                 yield Button("Cancelar", id="no")
                 yield Button(self.confirm_label, id="yes", variant="error")
+
+    @on(Button.Pressed, "#details")
+    def details(self) -> None:
+        if self.details_url:
+            try:
+                webbrowser.open(self.details_url, new=2)
+            except Exception:
+                pass
 
     @on(Button.Pressed, "#yes")
     def yes(self) -> None:
@@ -232,6 +269,48 @@ class ConfirmScreen(ModalScreen[bool]):
     @on(Button.Pressed, "#no")
     def no(self) -> None:
         self.dismiss(False)
+
+
+async def _latest_opencode_version(app: OcodeApp, hint: str) -> str | None:
+    busy = BusyScreen("Buscando la última versión de OpenCode...")
+    await app.push_screen(busy)
+    await asyncio.sleep(0)
+    try:
+        versions = await asyncio.to_thread(list_remote_versions)
+    except VersionListError as exc:
+        busy.dismiss(None)
+        app.push_screen(
+            MessageScreen(
+                "No se puede actualizar",
+                f"No se pudo consultar la última versión:\n{exc}\n\n{hint}",
+            )
+        )
+        return None
+    if not versions:
+        busy.dismiss(None)
+        app.push_screen(
+            MessageScreen(
+                "No se puede actualizar",
+                f"El registro no devolvió versiones compatibles. {hint}",
+            )
+        )
+        return None
+    busy.dismiss(None)
+    return versions[0]
+
+
+async def _opencode_release_notes(version: str) -> tuple[str, str]:
+    try:
+        notes, url = await asyncio.to_thread(release_summary, version)
+    except Exception:
+        notes, url = "", RELEASES_PAGE
+    return notes, url or RELEASES_PAGE
+
+
+def _release_notes_text(version: str, notes: str) -> str:
+    if notes:
+        return f"\n\nNovedades de OpenCode {version}:\n{notes}"
+    return f"\n\nNo hay notas publicadas para OpenCode {version}."
 
 
 class UpdateScreen(ModalScreen[str | None]):
@@ -341,6 +420,7 @@ class AddProjectScreen(Screen):
     .field { margin-bottom: 1; }
     #buttons { height: 3; }
     #workspace-actions { height: 3; }
+    #opencode-version-actions { height: 3; }
     #browse { width: auto; }
     #add-content { height: 1fr; }
     .hint { color: $text-muted; margin-bottom: 1; }
@@ -381,6 +461,20 @@ class AddProjectScreen(Screen):
             yield Static("Maven y npm ya vienen instalados en el runtime.", classes="hint")
             yield Select(java_options, value="java8", id="runtime", classes="field")
 
+            yield Label("OpenCode")
+            yield Static(
+                "Por defecto se usa la última versión publicada. Si no se puede "
+                "consultar, se usa la versión de reserva. Puedes cambiarla.",                classes="hint",
+            )
+            yield Input(
+                value=cfg.opencode_version,
+                id="opencode-version",
+                classes="field",
+            )
+            with Horizontal(id="opencode-version-actions"):
+                yield Button("Elegir versión…", id="pick-opencode-version")
+            yield Static("", id="opencode-version-notice", classes="hint")
+
             yield Label("Repositorio Maven local (opcional)")
             yield Input(value=cfg.default_maven_repository, id="maven-repository", classes="field")
 
@@ -418,6 +512,51 @@ class AddProjectScreen(Screen):
 
     def on_mount(self) -> None:
         self.refresh_port_suggestion()
+        self.load_latest_opencode_version()
+
+    @work(exclusive=True, group="latest-opencode")
+    async def load_latest_opencode_version(self) -> None:
+        version_input = self.query_one("#opencode-version", Input)
+        notice = self.query_one("#opencode-version-notice", Static)
+        original = version_input.value
+        try:
+            versions = await asyncio.to_thread(list_remote_versions)
+        except VersionListError:
+            notice.update(
+                "No se pudo consultar la última versión; se usa la indicada. "
+                "Puedes escribir otra."
+            )
+            return
+        if not versions:
+            notice.update("No hay versiones publicadas; se usa la indicada.")
+            return
+        latest = versions[0]
+        if version_input.value == original:
+            version_input.value = latest
+        notice.update(f"Última publicada: {latest}. Puedes cambiarla.")
+
+    @on(Button.Pressed, "#pick-opencode-version")
+    def pick_opencode_version(self) -> None:
+        current = (
+            self.query_one("#opencode-version", Input).value.strip()
+            or self.app.global_cfg.opencode_version
+        )
+        self.app.push_screen(
+            OpenCodeVersionScreen(
+                current=current,
+                title="OpenCode para la nueva instancia",
+                action="Usar",
+                note=(
+                    "Se instalará al crear la instancia. La última publicada "
+                    "aparece en la lista; también puedes escribir otra."
+                ),
+            ),
+            self.apply_opencode_version,
+        )
+
+    def apply_opencode_version(self, version: str | None) -> None:
+        if version is not None:
+            self.query_one("#opencode-version", Input).value = version
 
     @work(exclusive=True, group="suggest-port")
     async def refresh_port_suggestion(self) -> None:
@@ -508,6 +647,13 @@ class AddProjectScreen(Screen):
         mode = str(self.query_one("#mode", Select).value)
         port_text = self.query_one("#port", Input).value.strip()
         maven_repository = self.query_one("#maven-repository", Input).value.strip()
+        try:
+            opencode_version = normalize_opencode_version(
+                self.query_one("#opencode-version", Input).value
+            )
+        except ValueError as exc:
+            self.app.push_screen(MessageScreen("Versión no válida", str(exc)))
+            return
 
         if not workspace or not Path(workspace).is_dir():
             self.app.push_screen(
@@ -565,6 +711,7 @@ class AddProjectScreen(Screen):
                 port=port,
                 maven_repository=maven_repository,
                 build_paths=build_paths,
+                opencode_version=opencode_version,
             )
         except ValueError as exc:
             self.app.push_screen(MessageScreen("Error", str(exc)))
@@ -1098,6 +1245,279 @@ class ContainerDirectoryScreen(Screen):
         self.app.action_navigation_back()
 
 
+LATEST_OPENCODE = "latest"
+
+
+class OpenCodeVersionScreen(ModalScreen[str | None]):
+    CSS = """
+    OpenCodeVersionScreen { align: center middle; }
+    #version-box {
+        width: 78%;
+        height: 80%;
+        max-height: 88%;
+        border: round $primary;
+        padding: 1 2;
+        background: $surface;
+    }
+    #version-content { height: 1fr; }
+    #opencode-version-input { margin-bottom: 1; }
+    #versions-status { height: auto; color: $text-muted; margin-bottom: 1; }
+    #versions-list {
+        height: auto;
+        max-height: 16;
+        border: round $primary;
+        margin-bottom: 1;
+    }
+    #versions-list ListItem { padding: 0 1; }
+    #version-actions { height: 3; }
+    #version-actions Button { width: 1fr; margin-right: 1; }
+    .hint { color: $text-muted; margin-bottom: 1; }
+    """
+
+    def __init__(
+        self,
+        *,
+        current: str,
+        title: str,
+        action: str,
+        note: str,
+        prefer_latest: bool = False,
+    ):
+        super().__init__()
+        self.current = current
+        self.title_text = title
+        self.action_label = action
+        self.note = note
+        self.prefer_latest = prefer_latest
+        self.versions: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="version-box"):
+            yield Label(self.title_text, classes="title")
+            with VerticalScroll(id="version-content"):
+                yield Static(self.note, classes="hint", markup=False)
+                yield Input(
+                    value=self.current,
+                    placeholder="2.0.24",
+                    id="opencode-version-input",
+                )
+                yield Static(
+                    "Consultando versiones publicadas…",
+                    id="versions-status",
+                    markup=False,
+                )
+                yield ListView(id="versions-list")
+            with Horizontal(id="version-actions"):
+                yield Button(self.action_label, id="version-apply", variant="success")
+                yield Button("Cancelar", id="version-cancel")
+
+    def on_mount(self) -> None:
+        self.load_versions()
+
+    @work(exclusive=True, group="opencode-versions")
+    async def load_versions(self) -> None:
+        status = self.query_one("#versions-status", Static)
+        try:
+            versions = await asyncio.to_thread(list_remote_versions)
+        except VersionListError as exc:
+            status.update(
+                f"No se pudo consultar la lista ({exc}). "
+                "Escribe la versión a mano y pulsa el botón."
+            )
+            return
+        if not self.is_attached:
+            return
+        self.versions = versions
+        view = self.query_one("#versions-list", ListView)
+        await view.clear()
+        for version in versions:
+            suffix = " · actual" if version == self.current else ""
+            view.append(ListItem(Label(f"{version}{suffix}", markup=False)))
+        if not versions:
+            status.update(
+                "El registro no devolvió versiones estables. Escribe la versión a mano."
+            )
+            return
+        status.update(
+            f"{len(versions)} versiones publicadas. La más reciente: {versions[0]}. "
+            "Selecciona una o escribe otra."
+        )
+        if self.prefer_latest:
+            self.query_one("#opencode-version-input", Input).value = versions[0]
+            view.index = 0
+        elif self.current in versions:
+            view.index = versions.index(self.current)
+        else:
+            view.index = 0
+        self.on_versions_loaded()
+
+    def on_versions_loaded(self) -> None:
+        pass
+
+    def on_version_selected(self, version: str) -> None:
+        pass
+
+    @on(ListView.Selected, "#versions-list")
+    def selected(self, event: ListView.Selected) -> None:
+        if event.index is not None and 0 <= event.index < len(self.versions):
+            version = self.versions[event.index]
+            self.query_one("#opencode-version-input", Input).value = version
+            self.on_version_selected(version)
+
+    def _input_version(self) -> str | None:
+        value = self.query_one("#opencode-version-input", Input).value
+        try:
+            return normalize_opencode_version(value)
+        except ValueError as exc:
+            self.query_one("#versions-status", Static).update(str(exc))
+            return None
+
+    @on(Button.Pressed, "#version-apply")
+    def apply(self) -> None:
+        version = self._input_version()
+        if version is not None:
+            self.dismiss(version)
+
+    @on(Button.Pressed, "#version-cancel")
+    def cancel(self) -> None:
+        self.dismiss(None)
+
+
+class OpenCodeUpdateAllScreen(OpenCodeVersionScreen):
+    CSS = OpenCodeVersionScreen.CSS + """
+    OpenCodeUpdateAllScreen { align: center middle; }
+    OpenCodeUpdateAllScreen #version-box { width: 88%; }
+    OpenCodeUpdateAllScreen #versions-list { max-height: 10; }
+    #version-notes {
+        height: auto;
+        border: round $primary;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
+    #version-notes-title { text-style: bold; }
+    #version-notes-open { width: auto; margin-top: 1; }
+    #version-actions #version-cancel { width: auto; }
+    """
+
+    def __init__(self, *, project_count: int, reserve: str):
+        super().__init__(
+            current=reserve,
+            title="Actualizar OpenCode en todas las instancias",
+            action="Actualizar seleccionada",
+            note=(
+                "Actualiza todas a la última publicada o a la versión elegida "
+                f"de la lista. Se revisarán {project_count} instancias. Las que "
+                "ya estén en la versión elegida no se reiniciarán. Se instala con "
+                "npm y se reinician; se conservan sesiones y datos, y se "
+                "interrumpen las tareas. Las detenidas se arrancan y se vuelven a "
+                "detener. Si una falla, se detiene el proceso. "
+                f"Reserva actual: {reserve}."
+            ),
+            prefer_latest=True,
+        )
+        self.notes_url = RELEASES_PAGE
+        self.notes_cache: dict[str, tuple[str, str]] = {}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="version-box"):
+            yield Label(self.title_text, classes="title")
+            with VerticalScroll(id="version-content"):
+                yield Static(self.note, classes="hint", markup=False)
+                yield Input(
+                    value=self.current,
+                    placeholder="2.0.24",
+                    id="opencode-version-input",
+                )
+                yield Static(
+                    "Consultando versiones publicadas…",
+                    id="versions-status",
+                    markup=False,
+                )
+                yield ListView(id="versions-list")
+                with Vertical(id="version-notes"):
+                    yield Label(
+                        "Novedades de OpenCode",
+                        id="version-notes-title",
+                        classes="section-title",
+                    )
+                    yield Static(
+                        "Selecciona una versión para ver sus novedades.",
+                        id="version-notes-body",
+                        markup=False,
+                    )
+                    yield Button("Abrir cambios", id="version-notes-open")
+            with Horizontal(id="version-actions"):
+                yield Button(
+                    "A la última",
+                    id="version-latest",
+                    variant="success",
+                )
+                yield Button("Actualizar elegida", id="version-selected")
+                yield Button("Cancelar", id="version-cancel")
+
+    def on_versions_loaded(self) -> None:
+        if self.versions:
+            self.load_notes(self.query_one("#opencode-version-input", Input).value)
+
+    def on_version_selected(self, version: str) -> None:
+        self.load_notes(version)
+
+    @on(Input.Submitted, "#opencode-version-input")
+    def submitted(self, event: Input.Submitted) -> None:
+        self.load_notes(event.value)
+
+    @work(exclusive=True, group="opencode-notes")
+    async def load_notes(self, version: str) -> None:
+        try:
+            version = normalize_opencode_version(version)
+        except ValueError:
+            return
+        title = self.query_one("#version-notes-title", Label)
+        body = self.query_one("#version-notes-body", Static)
+        title.update(f"Novedades de OpenCode {version}")
+        if version in self.notes_cache:
+            self.show_notes(version, *self.notes_cache[version])
+            return
+        body.update("Cargando novedades...")
+        notes, url = await _opencode_release_notes(version)
+        if not self.is_attached:
+            return
+        result = (notes, url or RELEASES_PAGE)
+        self.notes_cache[version] = result
+        self.show_notes(version, *result)
+
+    def show_notes(self, version: str, notes: str, url: str) -> None:
+        self.notes_url = url or RELEASES_PAGE
+        self.query_one("#version-notes-title", Label).update(
+            f"Novedades de OpenCode {version}"
+        )
+        body = self.query_one("#version-notes-body", Static)
+        if notes:
+            body.update(notes)
+        else:
+            body.update(f"No hay notas publicadas para OpenCode {version}.")
+        self.query_one("#version-notes-open", Button).label = (
+            "Abrir cambios" if notes else "Abrir releases"
+        )
+
+    @on(Button.Pressed, "#version-notes-open")
+    def open_notes(self) -> None:
+        try:
+            webbrowser.open(self.notes_url, new=2)
+        except Exception:
+            pass
+
+    @on(Button.Pressed, "#version-latest")
+    def apply_latest(self) -> None:
+        self.dismiss(self.versions[0] if self.versions else LATEST_OPENCODE)
+
+    @on(Button.Pressed, "#version-selected")
+    def apply_selected(self) -> None:
+        version = self._input_version()
+        if version is not None:
+            self.dismiss(version)
+
+
 class JavaScreen(Screen):
     CSS = """
     JavaScreen { padding: 1 3; }
@@ -1105,6 +1525,16 @@ class JavaScreen(Screen):
     #runtimes { height: 8; }
     .hint { color: $text-muted; margin-bottom: 1; }
     #back { width: auto; margin-bottom: 1; }
+    #opencode-section {
+        height: auto;
+        border: round $primary;
+        padding: 1 2;
+        margin-bottom: 2;
+    }
+    #opencode-section .section-title { text-style: bold; }
+    #opencode-section Static { height: auto; }
+    #opencode-section Horizontal { height: 3; }
+    #opencode-section Button { width: 1fr; margin-right: 1; }
     #maven-section {
         height: auto;
         border: round $primary;
@@ -1114,24 +1544,48 @@ class JavaScreen(Screen):
     #save-maven { margin-top: 1; }
     """
 
+    def on_screen_resume(self) -> None:
+        self.refresh_opencode_summary()
+
+    def refresh_opencode_summary(self) -> None:
+        try:
+            self.query_one("#opencode-current", Static).update(
+                self._opencode_summary()
+            )
+        except Exception:
+            pass
+
     def compose(self) -> ComposeResult:
         yield Header()
         yield Button("← Volver", id="back", variant="primary")
-        yield Label("Java y Maven", classes="title")
+        yield Label("Runtimes de OpenCode", classes="title")
         with VerticalScroll(id="java-content"):
+            with Vertical(id="opencode-section"):
+                yield Label("OpenCode", classes="section-title")
+                yield Static(self._opencode_summary(), id="opencode-current", markup=False)
+                yield Static(
+                    "La versión se instala con npm dentro de cada contenedor, sin "
+                    "reconstruir la imagen. «Actualizar todas» abre el selector: "
+                    "puedes ir a la última o elegir una concreta.",
+                    classes="hint",
+                    markup=False,
+                )
+                with Horizontal():
+                    yield Button(
+                        "Versión de reserva…",
+                        id="change-default-version",
+                        variant="success",
+                    )
+                    yield Button(
+                        "Actualizar todas",
+                        id="update-all-instances",
+                        variant="warning",
+                    )
             yield Static("Maven y npm ya vienen instalados en todos los runtimes.", classes="hint")
 
             table = DataTable(id="runtimes")
             table.add_columns("Java", "Imagen", "Estado")
-            for name, profile in self.app.global_cfg.runtimes.items():
-                if not profile.java:
-                    continue
-                table.add_row(
-                    f"Java {profile.java}",
-                    profile.image,
-                    "sin comprobar",
-                    key=name,
-                )
+            self._add_runtimes(table)
             table.cursor_type = "row"
             yield table
 
@@ -1151,6 +1605,76 @@ class JavaScreen(Screen):
                 )
                 yield Button("Guardar ruta por defecto", id="save-maven", variant="success")
         yield Footer()
+
+    def _opencode_summary(self) -> str:
+        cfg = self.app.global_cfg
+        return (
+            f"Versión de reserva: {cfg.opencode_version}\n"
+            f"Se usa si no se puede consultar la última publicada. "
+            f"Imagen base: {cfg.opencode_image}"
+        )
+
+    def _add_runtimes(self, table: DataTable) -> None:
+        for name, profile in self.app.global_cfg.runtimes.items():
+            if not profile.java:
+                continue
+            table.add_row(
+                f"Java {profile.java}",
+                profile.image,
+                "sin comprobar",
+                key=name,
+            )
+
+    @on(Button.Pressed, "#change-default-version")
+    def change_default_version(self) -> None:
+        cfg = self.app.global_cfg
+        self.app.push_screen(
+            OpenCodeVersionScreen(
+                current=cfg.opencode_version,
+                title="Versión de reserva de OpenCode",
+                action="Guardar",
+                note=(
+                    "Se usará al crear una instancia si no se puede consultar la "
+                    "última publicada. No cambia las instancias existentes ni "
+                    "reconstruye imágenes."
+                ),
+            ),
+            self.apply_default_version,
+        )
+
+    def apply_default_version(self, version: str | None) -> None:
+        if version is None:
+            return
+        try:
+            cfg = self.app.global_cfg.with_opencode_default(version)
+            if cfg.opencode_version == self.app.global_cfg.opencode_version:
+                self.app.push_screen(
+                    MessageScreen(
+                        "OpenCode",
+                        f"La versión de reserva ya es {cfg.opencode_version}.",
+                    )
+                )
+                return
+            self.app.store.save_global(cfg)
+        except Exception as exc:
+            self.app.push_screen(
+                MessageScreen("Error", f"No se pudo guardar la versión: {exc}")
+            )
+            return
+        self.app.global_cfg = cfg
+        self.query_one("#opencode-current", Static).update(self._opencode_summary())
+        self.app.push_screen(
+            MessageScreen(
+                "OpenCode",
+                f"Versión de reserva: {cfg.opencode_version}.\n\n"
+                "Las instancias existentes conservan la suya. Para cambiarlas, usa "
+                "«Actualizar OpenCode» en cada instancia o «Actualizar todas».",
+            )
+        )
+
+    @on(Button.Pressed, "#update-all-instances")
+    def update_all_instances(self) -> None:
+        self.app.open_opencode_update_all()
 
     @on(Button.Pressed, "#save-maven")
     def save_maven(self) -> None:
@@ -1472,6 +1996,7 @@ class ProjectScreen(Screen):
     .section-help { height: auto; margin-bottom: 1; }
     #danger-zone { border: round $error; }
     #instance-status { height: auto; margin-bottom: 1; }
+    #opencode-version-status { height: auto; margin-bottom: 1; color: $text-muted; }
     #provider-stale-notice { height: auto; margin-bottom: 1; color: $warning; }
     #navigation { height: auto; }
     #back { width: auto; margin-bottom: 1; }
@@ -1496,6 +2021,7 @@ class ProjectScreen(Screen):
         with VerticalScroll(id="instance-content"):
             yield Static(self._summary(), id="info", markup=False)
             yield Static("Estado: consultando...", id="instance-status", markup=False)
+            yield Static("", id="opencode-version-status", markup=False)
             yield Static("", id="provider-stale-notice", markup=False)
             with Vertical(classes="action-group"):
                 yield Label("Uso", classes="section-title")
@@ -1509,6 +2035,24 @@ class ProjectScreen(Screen):
                     yield Button("Detener", id="stop", variant="warning")
                 with Horizontal():
                     yield Button("Actualizar estado", id="refresh-status")
+            with Vertical(classes="action-group"):
+                yield Label("OpenCode", classes="section-title")
+                yield Static(
+                    "La versión se instala con npm dentro del contenedor. Se conservan "
+                    "sesiones y datos; se interrumpen las tareas.",
+                    classes="section-help",
+                    markup=False,
+                )
+                with Horizontal():
+                    yield Button(
+                        "Actualizar a la última",
+                        id="update-opencode-latest",
+                        variant="success",
+                    )
+                    yield Button(
+                        "Elegir versión…",
+                        id="update-opencode",
+                    )
             with Vertical(classes="action-group"):
                 yield Label("Configuración", classes="section-title")
                 yield Static(
@@ -1550,6 +2094,7 @@ class ProjectScreen(Screen):
         return "\n".join([
             f"Proyecto: {p.name} · Rama: {p.branch}",
             f"Working copy: {p.workspace}",
+            f"OpenCode: {p.opencode_version or self.app.global_cfg.opencode_version} · "
             f"Java: {java} · Modo por defecto: {mode} · Puerto Web: {p.port}",
             f"Reglas de protección: {len(p.sensitive_paths)}",
         ])
@@ -1576,8 +2121,10 @@ class ProjectScreen(Screen):
         if not self._exists():
             return
         status_widget = self.query_one("#instance-status", Static)
+        version_widget = self.query_one("#opencode-version-status", Static)
         notice = self.query_one("#provider-stale-notice", Static)
         status_widget.update("Estado: consultando...")
+        version_widget.update("")
         notice.update("")
         try:
             status = await asyncio.to_thread(
@@ -1598,8 +2145,51 @@ class ProjectScreen(Screen):
             status_widget.update("Estado: no disponible. Comprueba el motor en Diagnóstico.")
             return
 
+        project = self.project()
+        target_version = (
+            project.opencode_version or self.app.global_cfg.opencode_version
+        )
         if status == "absent":
+            version_widget.update(
+                f"OpenCode configurado: {target_version}. "
+                "Se aplicará al crear la instancia."
+            )
             return
+
+        try:
+            running_version = await asyncio.to_thread(
+                container_opencode_version,
+                self.app.global_cfg,
+                project.container_name,
+            )
+        except Exception:
+            running_version = ""
+        if running_version:
+            if project.opencode_version != running_version:
+                try:
+                    latest = self.app.store.get_project(project.project_id)
+                    if latest.opencode_version != running_version:
+                        latest.opencode_version = running_version
+                        self.app.store.save_project(latest)
+                except Exception:
+                    pass
+                try:
+                    self.query_one("#info", Static).update(self._summary())
+                except Exception:
+                    pass
+            state = (
+                "en ejecución"
+                if status in ("running", "restarting")
+                else "instalado"
+            )
+            version_widget.update(f"OpenCode {state}: {running_version}.")
+        else:
+            version_widget.update(
+                f"OpenCode configurado: {target_version}. "
+                "La instancia no está en ejecución; no se puede verificar la "
+                "versión instalada."
+            )
+
         try:
             stale = await asyncio.to_thread(
                 stale_providers,
@@ -1622,6 +2212,106 @@ class ProjectScreen(Screen):
                 + " en este contenedor. Usa «Guardar y recrear contenedor» "
                 "en Ajustes."
             )
+
+    @on(Button.Pressed, "#update-opencode")
+    def update_opencode(self) -> None:
+        p = self.project()
+        current = p.opencode_version or self.app.global_cfg.opencode_version
+        self.app.push_screen(
+            OpenCodeVersionScreen(
+                current=current,
+                title=f"Elegir versión de OpenCode · {p.name} / {p.branch}",
+                action="Continuar",
+                note=(
+                    "Selecciona la versión; después confirmarás la actualización. "
+                    "Se instala con npm y se reinicia el contenedor; se conservan "
+                    "sesiones y datos, y se interrumpen las tareas."
+                ),
+            ),
+            self.apply_opencode_version,
+        )
+
+    @on(Button.Pressed, "#update-opencode-latest")
+    def update_opencode_latest(self) -> None:
+        self.run_worker(
+            self.prepare_instance_update(None),
+            group="opencode-plan",
+            exclusive=True,
+        )
+
+    def apply_opencode_version(self, version: str | None) -> None:
+        if version is not None:
+            self.run_worker(
+                self.prepare_instance_update(version),
+                group="opencode-plan",
+                exclusive=True,
+            )
+
+    async def prepare_instance_update(self, version: str | None) -> None:
+        if version is None:
+            version = await _latest_opencode_version(
+                self.app, "Usa «Elegir versión…» para indicarla a mano."
+            )
+            if version is None:
+                return
+        busy = BusyScreen("Preparando la actualización...")
+        await self.app.push_screen(busy)
+        await asyncio.sleep(0)
+        notes, details_url = await _opencode_release_notes(version)
+        busy.dismiss(None)
+        text = (
+            f"¿Actualizar esta instancia a OpenCode {version}?\n\n"
+            "Se instalará con npm y se reiniciará el contenedor. Se conservan "
+            "las sesiones y los datos; se interrumpen las tareas. Si está "
+            "detenido, se arranca y se vuelve a detener."
+        ) + _release_notes_text(version, notes)
+
+        def confirmed(ok: bool | None) -> None:
+            if ok:
+                self.update_instance_opencode(version)
+
+        self.app.push_screen(
+            ConfirmScreen(
+                text,
+                confirm_label="Actualizar",
+                details_url=details_url,
+            ),
+            confirmed,
+        )
+
+    @work(exclusive=True, group="opencode-update")
+    async def update_instance_opencode(self, version: str) -> None:
+        p = self.project()
+        busy = BusyScreen(f"Actualizando esta instancia a OpenCode {version}...")
+        await self.app.push_screen(busy)
+        await asyncio.sleep(0)
+        try:
+            actual = await asyncio.to_thread(
+                update_project_opencode_version,
+                self.app.global_cfg,
+                p,
+                version,
+            )
+            p.opencode_version = version
+            self.app.store.save_project(p)
+        except Exception as exc:
+            busy.dismiss(None)
+            self.app.push_screen(
+                MessageScreen("Error al actualizar OpenCode", str(exc))
+            )
+            return
+        busy.dismiss(None)
+        if actual:
+            message = (
+                f"Instancia actualizada a OpenCode {version}.\n\n"
+                "Se conservan sus sesiones y datos."
+            )
+        else:
+            message = (
+                f"OpenCode configurado: {version}. "
+                "Se aplicará al crear la instancia."
+            )
+        self.app.push_screen(MessageScreen("OpenCode", message))
 
 
     def _protection_notice(self, project: ProjectConfig) -> str:
@@ -1726,6 +2416,14 @@ class ProjectScreen(Screen):
                     container_id = await asyncio.to_thread(
                         launch_detached,
                         preview,
+                    )
+                    busy.query_one(Static).update(
+                        f"Aplicando OpenCode {p.opencode_version or self.app.global_cfg.opencode_version}..."
+                    )
+                    await asyncio.to_thread(
+                        apply_project_opencode_version,
+                        self.app.global_cfg,
+                        p,
                     )
 
                 # docker run -d may succeed even if OpenCode exits
@@ -2153,11 +2851,19 @@ class MainScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="top-actions"):
+            yield Button(
+                "Actualizar OpenCode",
+                id="opencode-all",
+                variant="warning",
+            )
             yield Button("Opciones", id="options", variant="primary")
         yield Label("ocode · instancias OpenCode", classes="title")
 
         table = DataTable(id="projects")
-        table.add_columns("Proyecto", "Rama", "Java", "Estado", "Puerto", "Working copy")
+        table.add_columns(
+            "Proyecto", "Rama", "Java", "OpenCode", "Estado", "Puerto",
+            "Working copy",
+        )
         for p in self.app.store.list_projects():
             profile = self.app.global_cfg.runtimes.get(p.runtime)
             java = profile.java if profile else p.runtime
@@ -2165,6 +2871,7 @@ class MainScreen(Screen):
                 p.name,
                 p.branch,
                 java,
+                self._opencode_version(p),
                 "Consultando…",
                 str(p.port),
                 p.workspace,
@@ -2177,7 +2884,7 @@ class MainScreen(Screen):
             with Grid(id="toolbar-primary"):
                 yield Button("Añadir", id="add", variant="success")
                 yield Button("Gestionar instancia", id="open", variant="primary")
-                yield Button("Java / Maven", id="java")
+                yield Button("Runtimes", id="java")
                 yield Button("Proveedores", id="providers")
             with Horizontal(id="toolbar-secondary"):
                 yield Button("Motor", id="container-runtime")
@@ -2198,18 +2905,30 @@ class MainScreen(Screen):
         existing = {key.value for key in table.rows}
         for project in projects:
             if project.project_id in existing:
+                row = table.get_row_index(project.project_id)
+                profile = self.app.global_cfg.runtimes.get(project.runtime)
+                java = profile.java if profile else project.runtime
+                table.update_cell_at(Coordinate(row, 2), java)
                 table.update_cell_at(
-                    Coordinate(table.get_row_index(project.project_id), 4),
-                    str(project.port),
+                    Coordinate(row, 3), self._opencode_version(project)
                 )
+                table.update_cell_at(Coordinate(row, 5), str(project.port))
             else:
                 profile = self.app.global_cfg.runtimes.get(project.runtime)
                 java = profile.java if profile else project.runtime
                 table.add_row(
-                    project.name, project.branch, java, "Consultando…",
-                    str(project.port), project.workspace, key=project.project_id,
+                    project.name, project.branch, java,
+                    self._opencode_version(project), "Consultando…",
+                    str(project.port), project.workspace,
+                    key=project.project_id,
                 )
         self.refresh_instance_statuses()
+
+    def _opencode_version(self, project: ProjectConfig) -> str:
+        return (
+            project.opencode_version
+            or self.app.global_cfg.opencode_version
+        )
 
     @work(exclusive=True, group="instance-statuses")
     async def refresh_instance_statuses(self) -> None:
@@ -2228,6 +2947,7 @@ class MainScreen(Screen):
         for project in projects:
             if not any(key.value == project.project_id for key in table.rows):
                 continue
+            status = ""
             try:
                 status = await asyncio.to_thread(
                     container_status,
@@ -2237,10 +2957,35 @@ class MainScreen(Screen):
                 label = labels.get(status, status)
             except Exception:
                 label = "No disponible"
+            version = (
+                project.opencode_version
+                or self.app.global_cfg.opencode_version
+            )
+            if status and status != "absent":
+                try:
+                    actual = await asyncio.to_thread(
+                        container_opencode_version,
+                        self.app.global_cfg,
+                        project.container_name,
+                    )
+                except Exception:
+                    actual = ""
+                if actual:
+                    version = actual
+                    if project.opencode_version != actual:
+                        try:
+                            latest = self.app.store.get_project(
+                                project.project_id
+                            )
+                            if latest.opencode_version != actual:
+                                latest.opencode_version = actual
+                                self.app.store.save_project(latest)
+                        except Exception:
+                            pass
             if any(key.value == project.project_id for key in table.rows):
-                table.update_cell_at(
-                    Coordinate(table.get_row_index(project.project_id), 3), label,
-                )
+                row = table.get_row_index(project.project_id)
+                table.update_cell_at(Coordinate(row, 3), version)
+                table.update_cell_at(Coordinate(row, 4), label)
 
     def selected_project(self) -> str | None:
         table = self.query_one("#projects", DataTable)
@@ -2275,6 +3020,10 @@ class MainScreen(Screen):
     @on(Button.Pressed, "#container-runtime")
     def container_runtime(self) -> None:
         self.app.push_screen(ContainerRuntimeScreen(required=False))
+
+    @on(Button.Pressed, "#opencode-all")
+    def opencode_all(self) -> None:
+        self.app.open_opencode_update_all()
 
     @on(Button.Pressed, "#doctor")
     async def doctor_clicked(self) -> None:
@@ -2398,6 +3147,274 @@ class OcodeApp(App[LaunchRequest | None]):
         screen = self._navigation_forward.pop()
         super().push_screen(screen)
         self.refresh_bindings()
+
+    def open_opencode_update_all(self) -> None:
+        self.push_screen(
+            OpenCodeUpdateAllScreen(
+                project_count=len(self.store.list_projects()),
+                reserve=self.global_cfg.opencode_version,
+            ),
+            self.apply_opencode_update_all,
+        )
+
+    def apply_opencode_update_all(self, choice: str | None) -> None:
+        if choice is None:
+            return
+        version = None if choice == LATEST_OPENCODE else choice
+        self.run_worker(
+            self.prepare_opencode_update_all(version),
+            group="opencode-plan",
+            exclusive=True,
+        )
+
+    async def prepare_opencode_update_all(self, version: str | None) -> None:
+        if version is None:
+            version = await _latest_opencode_version(
+                self,
+                "Abre «Actualizar todas» y escribe la versión a mano.",
+            )
+            if version is None:
+                return
+        cfg = self.global_cfg
+        projects = self.store.list_projects()
+        busy = BusyScreen("Preparando la actualización...")
+        await self.push_screen(busy)
+        await asyncio.sleep(0)
+
+        labels = {
+            "running": "en ejecución",
+            "exited": "detenida",
+            "created": "detenida",
+            "absent": "sin iniciar",
+            "paused": "en pausa",
+            "restarting": "reiniciándose",
+            "dead": "con error",
+            "removing": "eliminándose",
+        }
+        pending: list[ProjectConfig] = []
+        plan_lines: list[str] = []
+        blocked: list[str] = []
+        for project in projects:
+            try:
+                status = await asyncio.to_thread(
+                    container_status, cfg, project.container_name
+                )
+            except Exception:
+                status = ""
+            actual = ""
+            if status and status != "absent":
+                try:
+                    actual = await asyncio.to_thread(
+                        container_opencode_version,
+                        cfg,
+                        project.container_name,
+                    )
+                except Exception:
+                    actual = ""
+            current = (
+                actual
+                or project.opencode_version
+                or cfg.opencode_version
+            )
+            if current == version:
+                continue
+            if status in ("paused", "dead", "removing"):
+                blocked.append(
+                    f"- {project.name}/{project.branch}: "
+                    f"{labels.get(status, status)}"
+                )
+                continue
+            pending.append(project)
+            plan_lines.append(
+                f"- {project.name}/{project.branch}: {current} → {version} "
+                f"({labels.get(status, 'estado desconocido')})"
+            )
+
+        if blocked:
+            busy.dismiss(None)
+            self.push_screen(
+                MessageScreen(
+                    "No se puede actualizar",
+                    "Estas instancias no se pueden actualizar en su estado actual:\n"
+                    + "\n".join(blocked)
+                    + "\n\nDetenlas o arráncalas desde ocode y vuelve a intentarlo. "
+                    "No se ha tocado ninguna instancia.",
+                )
+            )
+            return
+
+        if not pending:
+            busy.dismiss(None)
+            try:
+                self._save_opencode_default(version)
+            except Exception as exc:
+                self.push_screen(
+                    MessageScreen("Error", f"No se pudo guardar la versión: {exc}")
+                )
+                return
+            self.push_screen(
+                MessageScreen(
+                    "OpenCode",
+                    f"Todas las instancias ya están en OpenCode {version}. "
+                    "No se ha reiniciado ninguna.",
+                )
+            )
+            return
+
+        try:
+            available = await asyncio.to_thread(npm_version_available, version)
+        except (VersionListError, ValueError) as exc:
+            busy.dismiss(None)
+            self.push_screen(
+                MessageScreen(
+                    "No se puede actualizar",
+                    f"No se pudo comprobar OpenCode {version} en npm:\n{exc}\n\n"
+                    "No se ha tocado ninguna instancia.",
+                )
+            )
+            return
+        if not available:
+            busy.dismiss(None)
+            self.push_screen(
+                MessageScreen(
+                    "No se puede actualizar",
+                    f"OpenCode {version} no está disponible en npm. "
+                    "No se ha tocado ninguna instancia.",
+                )
+            )
+            return
+        try:
+            notes, details_url = await _opencode_release_notes(version)
+        except Exception:
+            notes, details_url = "", RELEASES_PAGE
+        busy.dismiss(None)
+        self.confirm_opencode_update_all(
+            version, pending, plan_lines, notes, details_url
+        )
+
+    def confirm_opencode_update_all(
+        self,
+        version: str,
+        pending: list[ProjectConfig],
+        plan_lines: list[str],
+        notes: str,
+        details_url: str,
+    ) -> None:
+        text = (
+            f"¿Actualizar OpenCode a {version} en {len(pending)} instancia(s)?\n\n"
+            + "\n".join(plan_lines)
+            + "\n\nSe instala con npm y se reinicia cada contenedor. Se conservan "
+            "las sesiones y los datos; se interrumpen las tareas. Las instancias "
+            "detenidas se arrancan y se vuelven a detener. Si una falla, se detiene "
+            "el proceso y las siguientes no se tocan. Al terminar, será también la "
+            "versión de reserva."
+        ) + _release_notes_text(version, notes)
+
+        def confirmed(ok: bool | None) -> None:
+            if ok:
+                self.run_worker(
+                    self.update_all_opencode_versions(version, pending),
+                    group="opencode-update-all",
+                    exclusive=True,
+                )
+
+        self.push_screen(
+            ConfirmScreen(
+                text,
+                confirm_label="Actualizar",
+                details_url=details_url or RELEASES_PAGE,
+            ),
+            confirmed,
+        )
+
+    async def update_all_opencode_versions(
+        self, version: str, pending: list[ProjectConfig]
+    ) -> None:
+        cfg = self.global_cfg
+        if not pending:
+            try:
+                self._save_opencode_default(version)
+            except Exception as exc:
+                self.push_screen(
+                    MessageScreen("Error", f"No se pudo guardar la versión: {exc}")
+                )
+                return
+            self.push_screen(
+                MessageScreen(
+                    "OpenCode",
+                    f"No había instancias que cambiar. Versión de reserva: {version}.",
+                )
+            )
+            return
+
+        busy = BusyScreen(
+            f"Actualizando {len(pending)} instancias a OpenCode {version}..."
+        )
+        await self.push_screen(busy)
+        await asyncio.sleep(0)
+        updated: list[str] = []
+        failed: tuple[ProjectConfig, Exception] | None = None
+        try:
+            for index, project in enumerate(pending, 1):
+                busy.query_one(Static).update(
+                    f"Actualizando {project.name}/{project.branch} a OpenCode "
+                    f"{version}... ({index}/{len(pending)})"
+                )
+                try:
+                    await asyncio.to_thread(
+                        update_project_opencode_version, cfg, project, version
+                    )
+                    project.opencode_version = version
+                    self.store.save_project(project)
+                    updated.append(f"{project.name}/{project.branch}")
+                except Exception as exc:
+                    failed = (project, exc)
+                    break
+        finally:
+            busy.dismiss(None)
+
+        if failed is not None:
+            project, exc = failed
+            remaining = len(pending) - len(updated) - 1
+            self.push_screen(
+                MessageScreen(
+                    "Actualización incompleta",
+                    f"Actualizadas: {len(updated)}.\n"
+                    f"Falló: {project.name}/{project.branch}:\n{exc}\n"
+                    f"Sin tocar: {remaining}.\n\n"
+                    "No se ha cambiado la versión de reserva.",
+                )
+            )
+            return
+
+        try:
+            self._save_opencode_default(version)
+        except Exception as exc:
+            self.push_screen(
+                MessageScreen(
+                    "OpenCode actualizado",
+                    f"Instancias actualizadas: {len(updated)}.\n\n"
+                    f"No se pudo guardar la versión de reserva: {exc}",
+                )
+            )
+            return
+        self.push_screen(
+            MessageScreen(
+                "OpenCode actualizado",
+                f"Actualizadas {len(updated)} instancias a OpenCode {version}.\n"
+                f"Versión de reserva: {version}.",
+            )
+        )
+
+    def _save_opencode_default(self, version: str) -> None:
+        cfg = self.global_cfg.with_opencode_default(version)
+        if cfg.opencode_version == self.global_cfg.opencode_version:
+            return
+        self.store.save_global(cfg)
+        self.global_cfg = cfg
+        for screen in self.screen_stack:
+            if isinstance(screen, JavaScreen):
+                screen.refresh_opencode_summary()
 
     def on_mount(self) -> None:
         if self.global_cfg.container_runtime.kind == "unset":

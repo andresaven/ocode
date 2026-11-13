@@ -1,7 +1,13 @@
 from pathlib import Path
 from . import providers
-from .docker import docker_available, image_exists
+from .docker import (
+    container_opencode_version,
+    container_status,
+    docker_available,
+    image_exists,
+)
 from .store import provider_env_snippet, provider_env_status, project_overrides_providers
+from .versions import VersionListError, list_remote_versions, npm_version_available
 
 
 def doctor(paths, cfg, projects):
@@ -9,6 +15,39 @@ def doctor(paths, cfg, projects):
 
     ok, detail = docker_available(cfg)
     lines.append(("✓" if ok else "✗") + f" Runtime contenedores: {detail}")
+
+    lines.append(
+        f"• OpenCode de reserva: {cfg.opencode_version} ({cfg.opencode_image})"
+    )
+
+    try:
+        versions = list_remote_versions()
+    except VersionListError as exc:
+        lines.append(
+            f"• Última OpenCode publicada: no se pudo consultar ({exc})"
+        )
+    else:
+        if versions:
+            lines.append(f"• Última OpenCode publicada: {versions[0]}")
+
+    versions_to_check = {cfg.opencode_version}
+    versions_to_check.update(
+        project.opencode_version or cfg.opencode_version
+        for project in projects
+    )
+    for version in sorted(versions_to_check):
+        try:
+            available = npm_version_available(version)
+        except (VersionListError, ValueError) as exc:
+            lines.append(
+                f"• OpenCode {version} en npm: no se pudo comprobar ({exc})"
+            )
+        else:
+            lines.append(
+                ("✓" if available else "✗")
+                + f" OpenCode {version} en npm: "
+                + ("disponible" if available else "no disponible")
+            )
 
     lines.append(
         ("✓" if paths.global_agents.exists() else "✗")
@@ -50,9 +89,38 @@ def doctor(paths, cfg, projects):
 
     for p in projects:
         exists = Path(p.workspace).is_dir()
+        version = p.opencode_version or cfg.opencode_version
+        status = ""
+        installed = ""
+        try:
+            status = container_status(cfg, p.container_name)
+        except Exception:
+            status = ""
+        if status and status != "absent":
+            try:
+                installed = container_opencode_version(cfg, p.container_name)
+            except Exception:
+                installed = ""
+        state = {
+            "running": "en ejecución",
+            "exited": "detenida",
+            "created": "detenida",
+            "absent": "sin iniciar",
+            "paused": "en pausa",
+            "restarting": "reiniciándose",
+            "dead": "con error",
+            "removing": "eliminándose",
+        }.get(status, "estado desconocido")
+        detail = f" · OpenCode configurado {version}"
+        if installed:
+            detail += f" · instalado {installed}"
+            if installed != version:
+                detail += " ⚠ (se sincronizará al abrir la instancia)"
+        if status:
+            detail += f" · {state}"
         lines.append(
             ("✓" if exists else "✗")
-            + f" {p.name}/{p.branch}: {p.workspace}"
+            + f" {p.name}/{p.branch}: {p.workspace}{detail}"
         )
         project_config = paths.project_config(p.project_id)
         if (

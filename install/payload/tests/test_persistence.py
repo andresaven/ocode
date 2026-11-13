@@ -12,7 +12,14 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from ocode import docker
-from ocode.model import ContainerRuntime, GlobalConfig, MAVEN_VERSION, ProjectConfig
+from ocode.model import (
+    ContainerRuntime,
+    GlobalConfig,
+    MAVEN_VERSION,
+    OPENCODE_IMAGE,
+    OPENCODE_VERSION,
+    ProjectConfig,
+)
 from ocode.paths import Paths
 from ocode.store import (
     _ensure_provider_env,
@@ -422,6 +429,10 @@ class PersistenceTests(unittest.TestCase):
                 )
                 self.assertNotIn("--rm", preview.args)
                 self.assertIn("io.ocode.mode=shared", preview.args)
+                self.assertIn(
+                    f"io.ocode.opencode-version={self.cfg.opencode_version}",
+                    preview.args,
+                )
                 self.assertIn("-d", preview.args)
                 self.assertIn("-p", preview.args)
                 self.assertEqual(preview.args[-1], "/usr/local/lib/ocode-web-proxy.mjs")
@@ -490,8 +501,10 @@ class PersistenceTests(unittest.TestCase):
                     docker, "run_capture", return_value=Mock(stdout="preparado")
                 ) as run:
                     self.assertIn(f"maven{MAVEN_VERSION}", profile.image)
+                    self.assertIn(f"ocode-runtime:{OPENCODE_VERSION}", profile.image)
                     self.assertEqual(docker.build_runtime(paths, self.cfg, name), "preparado")
                     dockerfile = (paths.runtimes_dir / name / "Dockerfile").read_text()
+                    self.assertTrue(dockerfile.startswith(f"FROM {OPENCODE_IMAGE}\n"))
                     self.assertIn(f"maven={MAVEN_VERSION}-r0", dockerfile)
                     self.assertIn("alpine/v3.21/community", dockerfile)
                     self.assertIn(f"apk add --no-cache openjdk{profile.java}-jdk", dockerfile)
@@ -830,7 +843,7 @@ class RecreateContainerTests(unittest.TestCase):
         for name in (
             "build_run_command", "image_exists", "container_status",
             "stop_container", "remove_container", "launch_detached",
-            "wait_for_backend", "remove_state",
+            "apply_project_opencode_version", "wait_for_backend", "remove_state",
         ):
             mock = stack.enter_context(patch.object(docker, name))
             setattr(self, name, mock)
@@ -848,7 +861,8 @@ class RecreateContainerTests(unittest.TestCase):
         self.recreate()
         self.assertEqual([call[0] for call in self.calls.mock_calls], [
             "build_run_command", "image_exists", "container_status", "stop_container",
-            "remove_container", "launch_detached", "wait_for_backend",
+            "remove_container", "launch_detached", "apply_project_opencode_version",
+            "wait_for_backend",
         ])
         self.build_run_command.assert_called_once_with(
             paths=self.paths, global_cfg=self.cfg, project=self.project,
@@ -884,6 +898,18 @@ class RecreateContainerTests(unittest.TestCase):
             self.recreate()
         self.stop_container.assert_not_called()
         self.remove_container.assert_not_called()
+
+    def test_unavailable_npm_version_does_not_touch_the_instance(self):
+        self.project.opencode_version = "2.2.7"
+        with patch.object(
+            docker, "npm_version_available", return_value=False
+        ):
+            with self.assertRaisesRegex(docker.DockerError, "no está disponible"):
+                self.recreate()
+        self.stop_container.assert_not_called()
+        self.remove_container.assert_not_called()
+        self.launch_detached.assert_not_called()
+        self.apply_project_opencode_version.assert_not_called()
 
     def test_missing_configuration_does_not_touch_existing_container(self):
         self.paths.global_agents.is_file.return_value = False
