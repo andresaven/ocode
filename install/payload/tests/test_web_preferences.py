@@ -27,6 +27,8 @@ class WebPreferencesTests(unittest.TestCase):
                 )
 
             first = create("primera", 4100)
+            self.assertEqual(first.opencode_version,
+                             GlobalConfig.defaults().opencode_version)
             self.assertEqual(store.get_project(first.project_id).web_initial_preferences,
                              {"show_agent": True, "color_scheme": "dark"})
             cfg = store.load_global()
@@ -36,6 +38,14 @@ class WebPreferencesTests(unittest.TestCase):
             second = create("segunda", 4101)
             self.assertEqual(store.get_project(second.project_id).web_initial_preferences,
                              {"show_agent": False, "color_scheme": "light"})
+            explicit = store.create_project(
+                name="explicita", branch="main", workspace=directory,
+                runtime="java8", default_mode="tui", port=4102,
+                opencode_version="2.2.5",
+            )
+            self.assertEqual(
+                store.get_project(explicit.project_id).opencode_version, "2.2.5"
+            )
             self.assertEqual(store.get_project(first.project_id).web_initial_preferences,
                              {"show_agent": True, "color_scheme": "dark"})
 
