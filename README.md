@@ -23,7 +23,7 @@ cerrar ocode, la TUI de OpenCode o el navegador no elimina la instancia.
 
 El instalador instala las dependencias Python, incluida `textual>=0.89`.
 Los runtimes se basan en **OpenCode 2.0.24** e incluyen Java, Maven, Node.js,
-npm y Bash; estas herramientas no necesitan estar instaladas en Windows
+npm, Bash, Subversion (`svn`) y Python 3 (`python3`); estas herramientas no necesitan estar instaladas en Windows
 para usarlas dentro de la instancia.
 
 ## Instalación

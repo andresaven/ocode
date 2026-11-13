@@ -211,7 +211,7 @@ def build_runtime(paths: Paths, cfg: GlobalConfig, profile_name: str):
     # keep Java, Node and the other OS packages on the base image's branch.
     dockerfile = f"""FROM {cfg.opencode_image}
 USER root
-RUN apk add --no-cache {package} nodejs npm bash
+RUN apk add --no-cache {package} nodejs npm bash subversion python3
 RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.21/community maven={MAVEN_VERSION}-r0
 RUN mvn -version
 ENTRYPOINT ["opencode"]

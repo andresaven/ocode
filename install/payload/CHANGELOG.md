@@ -1,5 +1,15 @@
 # Cambios
 
+## 0.12.4
+
+- Los runtimes Java incluyen Subversion (`svn`) y Python 3 (`python3`),
+  instalados con `apk` al construir la imagen.
+- Los permisos predeterminados de OpenCode permiten `svn diff` y `svn diff *`,
+  pero bloquean `--diff-cmd` para impedir el uso de un comparador externo.
+- Si la imagen del runtime ya existe, hay que reconstruirla desde
+  **Java / Maven → Construir seleccionado** para incorporar las herramientas.
+  Los contenedores existentes requieren **Guardar y recrear contenedor**.
+
 ## 0.12.3
 
 - OpenCode Console (`opencode/<modelo>`) y OpenCode Go (`opencode-go/<modelo>`)
