@@ -137,6 +137,11 @@
     { "action": "shell", "resource": "npm test*", "effect": "allow" },
     { "action": "shell", "resource": "java -version", "effect": "allow" },
 
+    // SVN: solo lectura de diferencias.
+    { "action": "shell", "resource": "svn diff", "effect": "allow" },
+    { "action": "shell", "resource": "svn diff *", "effect": "allow" },
+    { "action": "shell", "resource": "svn diff *--diff-cmd*", "effect": "deny" },
+
     // Denegaciones de Maven, después de la regla general allow.
     { "action": "shell", "resource": "mvn *liquibase*", "effect": "deny" },
     { "action": "shell", "resource": "mvn *spring-boot:run*", "effect": "deny" },

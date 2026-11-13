@@ -104,6 +104,26 @@ class OpenCodeV2DefaultsTests(unittest.TestCase):
         self.assertNotIn('"permission": {', config)
         self.assertIn('"action": "glob"', config)
 
+    def test_svn_diff_permissions_deny_external_comparators_last(self):
+        from fnmatch import fnmatchcase
+
+        config = parse_jsonc(
+            (self.defaults / "opencode.jsonc").read_text(encoding="utf-8")
+        )
+        for command, expected in (
+            ("svn diff", "allow"),
+            ("svn diff src/example.py", "allow"),
+            ("svn diff --diff-cmd external", "deny"),
+            ("svn diff src/example.py --diff-cmd=external", "deny"),
+        ):
+            with self.subTest(command=command):
+                effects = [
+                    rule["effect"] for rule in config["permissions"]
+                    if rule["action"] == "shell"
+                    and fnmatchcase(command, rule["resource"])
+                ]
+                self.assertEqual(effects[-1], expected)
+
 
 class ProviderSeparationConfigTests(unittest.TestCase):
     def setUp(self):
@@ -488,6 +508,7 @@ class PersistenceTests(unittest.TestCase):
                     self.assertIn(f"maven={MAVEN_VERSION}-r0", dockerfile)
                     self.assertIn("alpine/v3.21/community", dockerfile)
                     self.assertIn(f"apk add --no-cache openjdk{profile.java}-jdk", dockerfile)
+                    self.assertIn("nodejs npm bash subversion python3", dockerfile)
                     self.assertIn("RUN mvn -version", dockerfile)
                     run.assert_called_once_with(docker.Engine("docker", ["docker"]), [
                         "build", "-t", profile.image, str(paths.runtimes_dir / name),
