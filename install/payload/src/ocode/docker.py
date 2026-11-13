@@ -1,16 +1,27 @@
 from dataclasses import dataclass
+import io
 import json
+import re
 import secrets
 from pathlib import Path, PureWindowsPath
 import shutil
 import subprocess
+import tarfile
 import time
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
 from . import providers
-from .model import GlobalConfig, MAVEN_VERSION, ProjectConfig, normalize_build_path
+from .model import (
+    GlobalConfig,
+    MAVEN_VERSION,
+    OPENCODE_VERSION,
+    ProjectConfig,
+    normalize_build_path,
+    normalize_opencode_version,
+)
 from .paths import Paths
+from .versions import VersionListError, npm_version_available
 
 
 class DockerError(RuntimeError):
@@ -127,7 +138,7 @@ def resolve_engine(cfg: GlobalConfig) -> Engine:
     )
 
 
-def run_capture(engine: Engine, args, check=True):
+def run_capture(engine: Engine, args, check=True, timeout=None):
     full = engine.command + list(args)
     try:
         return subprocess.run(
@@ -138,13 +149,25 @@ def run_capture(engine: Engine, args, check=True):
             errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            timeout=timeout,
         )
     except FileNotFoundError as exc:
         raise DockerError(
             f"No se encuentra el runtime: {' '.join(engine.command)}"
         ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise DockerError(
+            f"La operación tardó demasiado: {' '.join(args)}"
+        ) from exc
     except subprocess.CalledProcessError as exc:
-        raise DockerError(exc.stdout or str(exc)) from exc
+        raise DockerError(_clean_output(exc.stdout or str(exc))) from exc
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _clean_output(text: str) -> str:
+    return _ANSI_RE.sub("", text).replace("\r", "").strip()
 
 
 def docker_available(cfg: GlobalConfig):
@@ -211,7 +234,7 @@ def build_runtime(paths: Paths, cfg: GlobalConfig, profile_name: str):
     # keep Java, Node and the other OS packages on the base image's branch.
     dockerfile = f"""FROM {cfg.opencode_image}
 USER root
-RUN apk add --no-cache {package} nodejs npm bash
+RUN apk add --no-cache {package} nodejs npm bash subversion python3
 RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.21/community maven={MAVEN_VERSION}-r0
 RUN mvn -version
 ENTRYPOINT ["opencode"]
@@ -466,6 +489,11 @@ def build_run_command(
     args.append("-d")
     args.extend(["--name", project.container_name])
     args.extend(["--label", "io.ocode.mode=shared"])
+    args.extend([
+        "--label",
+        f"io.ocode.opencode-version="
+        f"{project.opencode_version or global_cfg.opencode_version}",
+    ])
 
     # Las claves de proveedores viajan en ficheros de entorno: nunca en argv.
     for provider in providers.PROVIDERS.values():
@@ -834,6 +862,130 @@ def container_status(cfg: GlobalConfig, name: str) -> str:
     return cp.stdout.strip() or "absent"
 
 
+def container_opencode_version(cfg: GlobalConfig, name: str) -> str:
+    """OpenCode version actually installed in a container.
+
+    Running containers are queried through the CLI. Stopped containers are
+    read from the npm package metadata, so the version is still visible.
+    """
+    engine = resolve_engine(cfg)
+    try:
+        cp = run_capture(
+            engine,
+            ["exec", name, "opencode", "--version"],
+            timeout=15,
+        )
+    except DockerError:
+        return container_package_version(cfg, name)
+    match = re.search(r"(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)", cp.stdout or "")
+    if match:
+        return match.group(1)
+    return container_package_version(cfg, name)
+
+
+def container_package_version(
+    cfg: GlobalConfig,
+    name: str,
+    package_path: str = "/usr/local/lib/node_modules/@opencode/cli/package.json",
+) -> str:
+    """Read the installed npm package version without starting the container."""
+    try:
+        engine = resolve_engine(cfg)
+    except DockerError:
+        return ""
+    try:
+        cp = subprocess.run(
+            engine.command + ["cp", f"{name}:{package_path}", "-"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    try:
+        with tarfile.open(fileobj=io.BytesIO(cp.stdout)) as archive:
+            for member in archive.getmembers():
+                if not member.isfile():
+                    continue
+                handle = archive.extractfile(member)
+                if handle is None:
+                    continue
+                data = json.loads(handle.read().decode("utf-8"))
+                return str(data.get("version") or "")
+    except (tarfile.TarError, ValueError):
+        return ""
+    return ""
+
+
+
+def upgrade_opencode(cfg: GlobalConfig, name: str, version: str) -> str:
+    """Upgrade OpenCode in place with npm, restart, and verify the result.
+
+    The npm package lives in the container's writable layer. It survives a
+    stop/start, but not a recreation; apply_project_opencode_version reapplies
+    it after a new container is created.
+    """
+    version = normalize_opencode_version(version)
+    engine = resolve_engine(cfg)
+    run_capture(
+        engine,
+        ["exec", name, "opencode", "upgrade", version, "--method", "npm"],
+        timeout=300,
+    )
+    run_capture(engine, ["restart", name], timeout=120)
+    actual = container_opencode_version(cfg, name)
+    if actual != version:
+        raise DockerError(
+            f"OpenCode no quedó en {version} "
+            f"(versión detectada: {actual or 'desconocida'}). "
+            "El contenedor se conserva; revisa los logs y vuelve a intentarlo."
+        )
+    return actual
+
+
+def apply_project_opencode_version(
+    cfg: GlobalConfig, project: ProjectConfig
+) -> str:
+    """Apply the project version after a container is created."""
+    target = project.opencode_version or cfg.opencode_version
+    if target == OPENCODE_VERSION:
+        return ""
+    return upgrade_opencode(cfg, project.container_name, target)
+
+
+def update_project_opencode_version(
+    cfg: GlobalConfig, project: ProjectConfig, version: str
+) -> str:
+    """Install a version in an existing container, preserving its state.
+
+    A stopped container is started for the upgrade and stopped again. A
+    running container is restarted by upgrade_opencode and left running.
+    """
+    version = normalize_opencode_version(version)
+    name = project.container_name
+    status = container_status(cfg, name)
+    if status == "absent":
+        return ""
+    if status in ("paused", "dead", "removing"):
+        raise DockerError(
+            f"No se puede actualizar una instancia en estado '{status}'. "
+            "Detenla o arráncala desde ocode y vuelve a intentarlo."
+        )
+    actual = container_opencode_version(cfg, name)
+    if actual == version:
+        return actual
+    started = False
+    if status in ("exited", "created"):
+        start_container(cfg, name)
+        started = True
+    try:
+        return upgrade_opencode(cfg, name, version)
+    finally:
+        if started:
+            stop_container(cfg, name)
+
+
 def stale_providers(cfg: GlobalConfig, paths: Paths, name: str) -> list[str]:
     """Ids de proveedores cuya etiqueta no coincide con la clave configurada.
 
@@ -937,6 +1089,22 @@ def recreate_container(*, paths: Paths, global_cfg: GlobalConfig, project: Proje
             "La instancia actual no se ha modificado."
         )
 
+    target_version = project.opencode_version or global_cfg.opencode_version
+    if target_version != OPENCODE_VERSION:
+        try:
+            available = npm_version_available(target_version)
+        except (VersionListError, ValueError) as exc:
+            raise DockerError(
+                f"No se puede confirmar OpenCode {target_version} en npm. "
+                "La instancia actual no se ha modificado.\n\n"
+                f"{exc}"
+            ) from exc
+        if not available:
+            raise DockerError(
+                f"OpenCode {target_version} no está disponible en npm. "
+                "La instancia actual no se ha modificado."
+            )
+
     status = container_status(global_cfg, project.container_name)
     if status not in ("absent", "running", "restarting", "exited", "created", "dead"):
         raise DockerError(
@@ -951,6 +1119,7 @@ def recreate_container(*, paths: Paths, global_cfg: GlobalConfig, project: Proje
         remove_container(global_cfg, project.container_name)
     try:
         launch_detached(preview)
+        apply_project_opencode_version(global_cfg, project)
         wait_for_backend(_tui_client_command(resolve_engine(global_cfg), project.container_name))
     except Exception as exc:
         raise DockerError(
@@ -1104,6 +1273,12 @@ def container_exit_report(
     logs = logs_cp.stdout.strip() or "(sin salida en logs)"
 
     return f"{status}\\n\\nLogs:\\n{logs}"
+
+
+def start_container(cfg: GlobalConfig, name):
+    engine = resolve_engine(cfg)
+    cp = run_capture(engine, ["start", name])
+    return cp.stdout.strip()
 
 
 def stop_container(cfg: GlobalConfig, name):

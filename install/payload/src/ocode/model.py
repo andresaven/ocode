@@ -1,12 +1,17 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, replace, asdict
 from pathlib import Path
 import json
 import re
 
 
+OPENCODE_REGISTRY = "ghcr.io"
+OPENCODE_REPOSITORY = "anomalyco/opencode"
 OPENCODE_VERSION = "2.0.24"
-OPENCODE_IMAGE = f"ghcr.io/anomalyco/opencode:{OPENCODE_VERSION}"
+OPENCODE_IMAGE = f"{OPENCODE_REGISTRY}/{OPENCODE_REPOSITORY}:{OPENCODE_VERSION}"
 MAVEN_VERSION = "3.9.9"
+MIN_OPENCODE_VERSION = (2, 0, 24)
+
+_OPENCODE_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 
 SENSITIVE_PATHS_FILENAME = "sensitive-paths.txt"
 
@@ -91,6 +96,48 @@ class RuntimeProfile:
     buildable: bool = False
 
 
+class OpenCodeVersionError(ValueError):
+    """The OpenCode version must be a Docker tag such as 2.0.24."""
+
+
+def normalize_opencode_version(value: str) -> str:
+    candidate = str(value).strip()
+    if candidate[:1] in ("v", "V"):
+        candidate = candidate[1:]
+    if not _OPENCODE_VERSION_RE.fullmatch(candidate):
+        raise OpenCodeVersionError(
+            f"Versión de OpenCode no válida: {value!r}. Usa el formato 2.0.24."
+        )
+    numeric = tuple(
+        int(part) for part in candidate.split("-", 1)[0].split(".")
+    )
+    if numeric < MIN_OPENCODE_VERSION:
+        raise OpenCodeVersionError(
+            f"OpenCode {candidate} no es compatible: ocode usa OpenCode 2.0.24 "
+            "o superior."
+        )
+    return candidate
+
+
+def runtime_profiles() -> dict[str, RuntimeProfile]:
+    """Built-in Java runtimes, keyed by profile.
+
+    The image is the Java/Maven base built from the ocode-pinned OpenCode
+    image. The actual OpenCode version is upgraded in place with npm, so it is
+    not part of the runtime tag.
+    """
+    java_versions = {"java8": "8", "java11": "11", "java17": "17", "java21": "21"}
+    return {
+        name: RuntimeProfile(
+            name,
+            f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java{java}",
+            java,
+            True,
+        )
+        for name, java in java_versions.items()
+    }
+
+
 @dataclass
 class ContainerRuntime:
     # auto | docker | podman | wsl-docker | custom
@@ -104,6 +151,7 @@ class GlobalConfig:
     default_mode: str = "tui"
     default_port: int = 4096
     bind_address: str = "127.0.0.1"
+    opencode_version: str = OPENCODE_VERSION
     opencode_image: str = OPENCODE_IMAGE
     security_no_new_privileges: bool = True
     cap_drop_all: bool = True
@@ -118,22 +166,21 @@ class GlobalConfig:
     @classmethod
     def defaults(cls):
         return cls(
+            opencode_version=OPENCODE_VERSION,
             opencode_image=OPENCODE_IMAGE,
             container_runtime=ContainerRuntime(kind="unset", command=[]),
-            runtimes={
-                "java8": RuntimeProfile(
-                    "java8", f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java8", "8", True
-                ),
-                "java11": RuntimeProfile(
-                    "java11", f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java11", "11", True
-                ),
-                "java17": RuntimeProfile(
-                    "java17", f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java17", "17", True
-                ),
-                "java21": RuntimeProfile(
-                    "java21", f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java21", "21", True
-                ),
-            },
+            runtimes=runtime_profiles(),
+        )
+
+    def with_opencode_default(self, version: str) -> "GlobalConfig":
+        """Return a copy with another default version for new instances.
+
+        Runtime images are the fixed Java/Maven base; the OpenCode version is
+        applied inside the container with npm, so it does not change the image.
+        """
+        return replace(
+            self,
+            opencode_version=normalize_opencode_version(version),
         )
 
     def to_dict(self):
@@ -142,20 +189,23 @@ class GlobalConfig:
     @classmethod
     def from_dict(cls, data):
         defaults = cls.defaults()
+        try:
+            version = normalize_opencode_version(
+                str(data.get("opencode_version") or OPENCODE_VERSION)
+            )
+        except OpenCodeVersionError:
+            version = OPENCODE_VERSION
         show_agent = data.get("web_show_agent", defaults.web_show_agent)
         color_scheme = data.get("web_color_scheme", defaults.web_color_scheme)
         if type(show_agent) is not bool:
             raise ValueError("web_show_agent debe ser un booleano")
         if color_scheme not in ("light", "dark"):
             raise ValueError("web_color_scheme debe ser light o dark")
-        # Built-in Java runtimes are managed by ocode and tied to the
-        # OpenCode and Maven versions. This replaces earlier image tags and
-        # forces a rebuild when either runtime version changes.
-        runtimes = dict(defaults.runtimes)
+        runtimes = runtime_profiles()
         runtimes.update({
             k: RuntimeProfile(**v)
             for k, v in data.get("runtimes", {}).items()
-            if k not in defaults.runtimes and k != "base"
+            if k not in runtimes and k != "base"
         })
 
         runtime_data = data.get("container_runtime", {})
@@ -169,8 +219,8 @@ class GlobalConfig:
             default_mode=data.get("default_mode", defaults.default_mode),
             default_port=int(data.get("default_port", defaults.default_port)),
             bind_address=data.get("bind_address", defaults.bind_address),
-            # OpenCode base image is managed by this ocode release.
-            opencode_image=defaults.opencode_image,
+            opencode_version=version,
+            opencode_image=OPENCODE_IMAGE,
             security_no_new_privileges=bool(
                 data.get("security_no_new_privileges", True)
             ),
@@ -200,6 +250,7 @@ class ProjectConfig:
     maven_repository: str = ""
     build_paths: list[str] = field(default_factory=list)
     web_initial_preferences: dict | None = None
+    opencode_version: str = ""
 
     def to_dict(self):
         return asdict(self)
@@ -212,7 +263,19 @@ class ProjectConfig:
             data["sensitive_paths"] = read_sensitive_paths(rules_path)
         elif "sensitive_paths" not in data:
             raise SensitivePathsError(f"Falta el fichero de protección: {rules_path}")
-        return cls(**data)
+        project = cls(**data)
+        if not isinstance(project.opencode_version, str):
+            project.opencode_version = ""
+        elif project.opencode_version:
+            try:
+                project.opencode_version = normalize_opencode_version(
+                    project.opencode_version
+                )
+            except OpenCodeVersionError:
+                # Keep the invalid value visible so the instance can be repaired
+                # from the UI instead of disappearing from the project list.
+                pass
+        return project
 
     def save(self, path: Path, *, save_sensitive_paths: bool = False):
         rules = list(dict.fromkeys(

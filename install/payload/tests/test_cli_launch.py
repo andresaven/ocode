@@ -35,6 +35,34 @@ class LaunchDiagnosticTests(unittest.TestCase):
         self.assertNotIn(f"[ocode] TUI: contenedor={project.container_name}", lines)
         self.assertNotIn(preview.foreground_args[-1], "\n".join(lines))
 
+    def test_new_container_applies_the_pinned_version_before_attaching(self):
+        project = ProjectConfig(
+            "test-id", "demo", "branch", ".", port=4097,
+            opencode_version="2.2.7",
+        )
+        store = Mock()
+        store.get_project.return_value = project
+        preview = docker.CommandPreview(
+            ["docker", "run", "-d", project.container_name],
+            foreground_args=docker._tui_client_command(
+                docker.Engine("docker", ["docker"]), project.container_name,
+            ),
+        )
+        with patch.object(cli, "OcodeApp") as app, \
+             patch.object(cli, "build_launch_command", return_value=preview), \
+             patch.object(cli, "sensitive_applied_paths", return_value=[]), \
+             patch.object(cli, "launch_detached") as launch, \
+             patch.object(cli, "apply_project_opencode_version",
+                          return_value="2.2.7") as apply, \
+             patch.object(cli, "launch_foreground", return_value=0), \
+             patch("builtins.print"):
+            app.return_value.run.side_effect = [LaunchRequest(project.project_id, "tui"), None]
+            self.assertEqual(cli.run_tui(store, Mock()), 0)
+
+        launch.assert_called_once_with(preview)
+        apply.assert_called_once()
+        self.assertEqual(preview.args, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,48 @@
 # Cambios
 
+## 0.13.0
+
+- Cada instancia guarda su versión de OpenCode en `project.json`
+  (`opencode_version`). La versión global de `config.json` es el valor por
+  defecto de las instancias nuevas; al actualizar desde una versión anterior se
+  detecta la versión npm instalada en el contenedor, aunque esté detenido, y se
+  fija en el proyecto.
+- Al añadir una instancia se propone la última versión publicada de OpenCode;
+  se puede cambiar antes de guardar. El registro se filtra a OpenCode 2.x desde
+  la 2.0.24, la primera que usó ocode; la 1.x y las anteriores no se ofrecen.
+- **Actualizar OpenCode** está en la barra superior de la pantalla principal:
+  abre un diálogo con la lista de versiones y las novedades de la seleccionada.
+  Desde ahí se actualiza a la última publicada o a una versión concreta; después
+  muestra el plan y comprueba la versión en npm. Si no está disponible, no se
+  modifica ninguna instancia.
+- La tabla principal muestra la versión de OpenCode de cada instancia junto a la
+  de Java. Es una sola versión, la instalada; ocode sincroniza el proyecto con
+  ella y, antes de recrear, comprueba que esté disponible en npm.
+- La pantalla de la instancia incluye **Actualizar a la última** y **Elegir
+  versión…**: ejecutan
+  `opencode upgrade <versión> --method npm`, reinician y verifican la versión. No
+  reconstruyen imágenes; conservan sesiones y datos; las instancias detenidas se
+  arrancan y se vuelven a detener.
+- **Runtimes** permite cambiar la versión de reserva (solo para instancias
+  nuevas) y **Actualizar todas** abre el mismo diálogo de versiones y novedades;
+  se detiene al primer fallo y deja las siguientes sin tocar.
+- Al recrear un contenedor se reaplica la versión fijada. Si el registro npm no
+  está disponible, el contenedor queda en la versión de la imagen base, la
+  interfaz lo avisa y no se pierden datos.
+- La lista de versiones se consulta en el registro de OpenCode; también se puede
+  escribir una versión a mano si no hay red o no aparece.
+- Antes de actualizar, el diálogo de todas las instancias y la confirmación
+  muestran las novedades publicadas de la versión elegida y un botón **Abrir
+  cambios**; si no hay notas, abre la página de releases.
+
+- Los runtimes Java incluyen Subversion (`svn`) y Python 3 (`python3`),
+  instalados con `apk` al construir la imagen.
+- Los permisos predeterminados de OpenCode permiten `svn diff` y `svn diff *`,
+  pero bloquean `--diff-cmd` para impedir el uso de un comparador externo.
+- Si la imagen del runtime ya existe, hay que reconstruirla desde
+  **Java / Maven → Construir seleccionado** para incorporar las herramientas.
+  Los contenedores existentes requieren **Guardar y recrear contenedor**.
+
 ## 0.12.3
 
 - OpenCode Console (`opencode/<modelo>`) y OpenCode Go (`opencode-go/<modelo>`)
@@ -131,5 +174,3 @@
   y no adquieren acceso Web automáticamente.
 - Pruebas de regresión para concurrencia, colisiones no destructivas, cierre
   del cliente y operaciones limitadas a la instancia seleccionada.
-""", "path">
-C:\entorno_desarrollo\ocode\install\payload\CHANGELOG.md

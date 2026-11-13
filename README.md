@@ -1,5 +1,7 @@
 # ocode
 
+Versión de ocode: **0.13.0**.
+
 ocode es una aplicación con interfaz de terminal (TUI) para gestionar instancias
 de OpenCode en contenedores Linux, organizadas por proyecto y working copy.
 Está orientada a Windows y mantiene la configuración de cada instancia fuera
@@ -23,8 +25,9 @@ cerrar ocode, la TUI de OpenCode o el navegador no elimina la instancia.
 
 El instalador instala las dependencias Python, incluida `textual>=0.89`.
 Los runtimes se basan en **OpenCode 2.0.24** e incluyen Java, Maven, Node.js,
-npm y Bash; estas herramientas no necesitan estar instaladas en Windows
-para usarlas dentro de la instancia.
+npm, Bash, Subversion (`svn`) y Python 3 (`python3`); estas herramientas no necesitan estar instaladas en Windows
+para usarlas dentro de la instancia. La versión de OpenCode de cada instancia se
+actualiza con npm desde su pantalla (ver «Runtimes de OpenCode»).
 
 ## Instalación
 
@@ -133,6 +136,13 @@ de puerto automáticamente ni afecta a otros contenedores.
 ## Gestionar instancias
 
 Selecciona una fila del menú principal y pulsa **Gestionar instancia** o Enter.
+La tabla principal muestra proyecto, rama, versión de Java, versión de OpenCode,
+estado, puerto Web y working copy. La versión de OpenCode es la instalada en el
+contenedor; ocode mantiene `opencode_version` sincronizado con ella. Si todavía
+no hay contenedor, se muestra la que se aplicará al crearlo. El botón
+**Actualizar OpenCode** de la barra superior abre el diálogo de actualización de
+todas las instancias: desde ahí puedes ir a la última publicada o elegir una
+versión concreta.
 La pantalla muestra proyecto, rama, working copy, Java, modo predeterminado,
 puerto y número de reglas de protección.
 
@@ -182,7 +192,7 @@ La operación requiere confirmación y:
 - deja el contenedor sustituto en ejecución.
 
 Detener y arrancar un contenedor no cambia su imagen, puertos ni montajes.
-Para cambiar Java, prepara antes la imagen correspondiente desde **Java**:
+Para cambiar Java, prepara antes la imagen correspondiente desde **Runtimes**:
 la recreación exige que la imagen esté disponible.
 
 Si falla la recreación, los ajustes pueden haber quedado guardados sin
@@ -199,9 +209,74 @@ persistentes de datos y estado, incluidas sus sesiones.
 las instrucciones, configuración y datos que necesites. No la utilices para
 aplicar ajustes; para eso está **Guardar y recrear contenedor**.
 
-## Runtimes Java
+## Runtimes de OpenCode (Java y Maven)
 
-La pantalla **Java** lista los perfiles y sus imágenes:
+### Versión de OpenCode
+
+Cada instancia guarda su versión en `projects\<Proyecto-Rama>\project.json`
+(`opencode_version`). La versión de `config\config.json` es el valor de reserva:
+se usa si no se puede consultar la última publicada. Al añadir una instancia, el
+campo **OpenCode** se rellena con la última versión publicada; puedes cambiarla
+antes de guardar o elegir otra de la lista. Al actualizar desde una versión
+anterior, ocode lee la versión npm instalada en el contenedor, aunque esté
+detenido, y la fija en el proyecto; si no puede leerla, usa la versión de
+reserva.
+
+Para actualizar una instancia: **Gestionar instancia → Actualizar a la última**.
+Busca la última versión publicada, muestra sus novedades y pide confirmación.
+Para una versión concreta, usa **Elegir versión…**: permite seleccionar una
+publicada o escribirla a mano. Al confirmar, ocode ejecuta dentro del contenedor
+`opencode upgrade <versión> --method npm` y lo reinicia para que el servidor use
+la versión nueva. No reconstruye ninguna imagen. Se conservan las sesiones y los
+datos; se interrumpen las tareas. Si la instancia está detenida, se arranca para
+la actualización y se vuelve a detener. La versión real se comprueba con
+`opencode --version`; si no coincide, se muestra el error y no se guarda el
+cambio.
+
+Para volver atrás, elige una versión anterior con **Elegir versión…**: `upgrade`
+admite una versión concreta, así que la vuelta atrás no necesita nada especial.
+
+Antes de confirmar, ocode muestra las novedades de OpenCode de esa versión
+cuando están publicadas y un botón **Abrir cambios** para verlas completas. Si
+la versión no tiene notas publicadas, el botón abre la página de releases.
+
+La versión que muestra ocode es una sola: la instalada. Si el contenedor tiene
+otra distinta de la guardada, la siguiente consulta actualiza
+`opencode_version` para reflejarla; no se muestran dos versiones en la tabla ni
+en la pantalla de la instancia.
+
+En **Runtimes**:
+
+- **Versión de reserva…** se usa al crear una instancia si no se puede
+  consultar la última publicada; no afecta a las existentes.
+- **Actualizar todas** abre un diálogo con la lista de versiones y las novedades
+  de la seleccionada. Desde ahí puedes actualizar a la última publicada o elegir
+  una versión concreta. Antes de confirmar muestra el plan (versión actual,
+  destino y estado de cada instancia) y comprueba que la versión exista en npm;
+  si no, no toca ninguna. Si una falla, se detiene y las siguientes no se tocan.
+  Si todas terminan bien, la versión elegida pasa a ser la de reserva.
+
+El botón **Actualizar OpenCode** de la barra superior de la pantalla principal
+abre el mismo diálogo, sin pasar por Runtimes.
+
+La versión npm vive en la capa escribible del contenedor. Sobrevive a detener y
+arrancar, pero no a recrear el contenedor. Al recrear, ocode comprueba antes
+que la versión esté disponible en npm y vuelve a instalarla antes de dejar la
+instancia lista. Si no puede confirmarlo, no toca la instancia actual. Si la
+instalación falla después, el contenedor queda con la versión de la imagen base
+(2.0.24), la interfaz lo avisa y no se pierden datos; la siguiente consulta
+sincroniza la versión mostrada con la instalada.
+
+La lista de versiones se consulta en el registro de OpenCode y se puede escribir
+cualquier versión a mano si no hay red o no aparece. Solo se listan las
+versiones **2.x** desde la **2.0.24**, la primera que usó ocode: la 1.x y las
+anteriores a 2.0.24 no se ofrecen. Las versiones estables publicadas actualmente
+incluyen la 2.0.24 y la 2.2.7.
+
+### Perfiles Java
+
+La pantalla **Runtimes** lista los perfiles y sus imágenes. La etiqueta de la
+imagen no incluye la versión de OpenCode: la imagen es la base de Java y Maven.
 
 | Perfil | Imagen |
 | --- | --- |
@@ -217,7 +292,7 @@ Maven se fija en la versión **3.9.9** del repositorio `community` de Alpine
 3.21; Java y los demás paquetes proceden de la distribución de la imagen
 base. La etiqueta nueva evita reutilizar imágenes anteriores con otra versión
 de Maven. Para aplicar el cambio a una instancia existente, prepara su
-runtime desde **Java / Maven** y usa **Guardar y recrear contenedor** en sus
+runtime desde **Runtimes** y usa **Guardar y recrear contenedor** en sus
 Ajustes; detenerla y arrancarla no cambia la imagen.
 
 Al abrir una instancia que todavía no tiene contenedor, ocode construye
@@ -232,7 +307,7 @@ sin consultar repositorios remotos. La ruta debe existir y terminar en
 `repository`. Guardar este ajuste requiere confirmar la recreación del
 contenedor; detenerlo y arrancarlo no cambia los montajes.
 
-La pantalla **Java / Maven** permite guardar una ruta por defecto para
+La pantalla **Runtimes** permite guardar una ruta por defecto para
 **nuevas instancias**. Al añadir una working copy se muestra esa ruta y puedes
 cambiarla o dejarla vacía para no montar ninguna. Cada instancia conserva su
 propio valor: modificar el predeterminado no afecta a las existentes.
@@ -546,6 +621,10 @@ La actualización descarga el paquete, lo extrae en la carpeta de instalación y
 reutiliza `install\install.cmd` y `install\payload\`. Conserva la configuración
 activa, proyectos, contenedores y volúmenes persistentes. Las instancias siguen
 funcionando y no se recrean automáticamente.
+
+La versión de OpenCode de cada instancia es independiente de la versión de
+ocode. Se actualiza desde la pantalla de la instancia con npm (ver «Runtimes de
+OpenCode»); actualizar ocode no cambia la versión de las instancias existentes.
 
 Si necesitas aplicar una imagen o unos montajes distintos, prepara el
 runtime y utiliza **Guardar y recrear contenedor** en la instancia.

@@ -22,6 +22,16 @@ class VersionTests(unittest.TestCase):
     def test_header_includes_version(self):
         self.assertEqual(OcodeApp.TITLE, f"ocode {__version__}")
 
+    def test_changelog_starts_with_package_version_without_duplicate_releases(self):
+        path = Path(__file__).resolve().parents[1] / "CHANGELOG.md"
+        headings = [
+            line.removeprefix("## ")
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("## ") and line != "## Sin publicar"
+        ]
+        self.assertEqual(headings[0], __version__)
+        self.assertEqual(len(headings), len(set(headings)))
+
     def test_cli_version_does_not_initialize_configuration(self):
         output = io.StringIO()
         with patch.object(sys, "argv", ["ocode", "--version"]), \
