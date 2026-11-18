@@ -504,15 +504,41 @@ class PersistenceTests(unittest.TestCase):
                     self.assertIn(f"ocode-runtime:{OPENCODE_VERSION}", profile.image)
                     self.assertEqual(docker.build_runtime(paths, self.cfg, name), "preparado")
                     dockerfile = (paths.runtimes_dir / name / "Dockerfile").read_text()
-                    self.assertTrue(dockerfile.startswith(f"FROM {OPENCODE_IMAGE}\n"))
-                    self.assertIn(f"maven={MAVEN_VERSION}-r0", dockerfile)
-                    self.assertIn("alpine/v3.21/community", dockerfile)
-                    self.assertIn(f"apk add --no-cache openjdk{profile.java}-jdk", dockerfile)
+                    self.assertIn(f"FROM {OPENCODE_IMAGE}\n", dockerfile)
+                    if name == "java25":
+                        self.assertIn("eclipse-temurin:25-jdk-alpine-3.22 AS jdk", dockerfile)
+                        self.assertIn(
+                            f"maven:{MAVEN_VERSION}-eclipse-temurin-21-alpine AS maven",
+                            dockerfile,
+                        )
+                        self.assertIn("COPY --from=jdk /opt/java/openjdk /opt/java/openjdk", dockerfile)
+                        self.assertIn("COPY --from=maven /usr/share/maven /usr/share/maven", dockerfile)
+                        self.assertIn("ENV JAVA_HOME=/opt/java/openjdk", dockerfile)
+                        self.assertIn("ENV PATH=$JAVA_HOME/bin:/usr/share/maven/bin:$PATH", dockerfile)
+                        self.assertIn("mvn -version", dockerfile)
+                        self.assertIn("Java version: 25", dockerfile)
+                        self.assertNotIn("--repository", dockerfile)
+                    else:
+                        self.assertIn(f"maven={MAVEN_VERSION}-r0", dockerfile)
+                        self.assertIn("alpine/v3.21/community", dockerfile)
+                        self.assertIn(f"apk add --no-cache openjdk{profile.java}-jdk", dockerfile)
+                        self.assertIn("RUN mvn -version", dockerfile)
                     self.assertIn("nodejs npm bash subversion python3", dockerfile)
-                    self.assertIn("RUN mvn -version", dockerfile)
+                    self.assertIn('ENTRYPOINT ["opencode"]', dockerfile)
                     run.assert_called_once_with(docker.Engine("docker", ["docker"]), [
                         "build", "-t", profile.image, str(paths.runtimes_dir / name),
                     ])
+
+    def test_java25_is_available_in_new_and_existing_configs(self):
+        old = self.cfg.to_dict()
+        del old["runtimes"]["java25"]
+        for cfg in (self.cfg, GlobalConfig.from_dict(old)):
+            profile = cfg.runtimes["java25"]
+            self.assertEqual(profile.java, "25")
+            self.assertTrue(profile.buildable)
+            self.assertEqual(
+                profile.image, f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java25"
+            )
 
     def test_previous_runtime_image_is_replaced_by_maven_pinned_tag(self):
         old = self.cfg.to_dict()

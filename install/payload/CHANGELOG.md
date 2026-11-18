@@ -1,5 +1,10 @@
 # Cambios
 
+## 0.14.0
+
+- Nuevo runtime **Java 25** con Eclipse Temurin y Maven 3.9.9, disponible
+  en **Runtimes**, al crear o editar instancias y con `ocode runtime build java25`.
+
 ## 0.13.0
 
 - Cada instancia guarda su versión de OpenCode en `project.json`

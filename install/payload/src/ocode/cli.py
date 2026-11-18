@@ -32,7 +32,7 @@ def _parser() -> argparse.ArgumentParser:
     runtime = sub.add_parser("runtime", help="Gestiona imágenes runtime.")
     runtime_sub = runtime.add_subparsers(dest="runtime_command")
     build = runtime_sub.add_parser("build", help="Construye un runtime.")
-    build.add_argument("profile", help="Ej.: java17, java21")
+    build.add_argument("profile", help="Ej.: java17, java21, java25")
 
     return parser
 

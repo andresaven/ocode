@@ -217,28 +217,37 @@ def build_runtime(paths: Paths, cfg: GlobalConfig, profile_name: str):
     if not profile.buildable:
         return "El runtime no necesita construcción."
 
-    package = {
-        "8": "openjdk8-jdk",
-        "11": "openjdk11-jdk",
-        "17": "openjdk17-jdk",
-        "21": "openjdk21-jdk",
-    }.get(profile.java)
-
-    if not package:
-        raise DockerError(f"Java no soportado: {profile.java}")
-
-    build_dir = paths.runtimes_dir / profile_name
-    build_dir.mkdir(parents=True, exist_ok=True)
-
-    # Alpine 3.21 community publishes Maven 3.9.9-r0. Maven is a Java package;
-    # keep Java, Node and the other OS packages on the base image's branch.
-    dockerfile = f"""FROM {cfg.opencode_image}
+    if profile.java == "25":
+        # Copy the musl JDK and Maven without mixing Alpine repositories or
+        # installing a second JDK to satisfy the Maven APK's dependency.
+        dockerfile = f"""FROM docker.io/library/eclipse-temurin:25-jdk-alpine-3.22 AS jdk
+FROM docker.io/library/maven:{MAVEN_VERSION}-eclipse-temurin-21-alpine AS maven
+FROM {cfg.opencode_image}
 USER root
-RUN apk add --no-cache {package} nodejs npm bash subversion python3
+RUN apk add --no-cache nodejs npm bash subversion python3 libstdc++ fontconfig ttf-dejavu binutils tzdata
+COPY --from=jdk /opt/java/openjdk /opt/java/openjdk
+COPY --from=maven /usr/share/maven /usr/share/maven
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH=$JAVA_HOME/bin:/usr/share/maven/bin:$PATH
+RUN javac -version \\
+    && version="$(mvn -version)" \\
+    && printf '%s\\n' "$version" | grep -E 'Java version: 25([.,]|$)'
+"""
+    elif profile.java in ("8", "11", "17", "21"):
+        # Alpine 3.21 community publishes Maven 3.9.9-r0. Keep Java, Node
+        # and the other OS packages on the base image's branch.
+        dockerfile = f"""FROM {cfg.opencode_image}
+USER root
+RUN apk add --no-cache openjdk{profile.java}-jdk nodejs npm bash subversion python3
 RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/v3.21/community maven={MAVEN_VERSION}-r0
 RUN mvn -version
-ENTRYPOINT ["opencode"]
 """
+    else:
+        raise DockerError(f"Java no soportado: {profile.java}")
+
+    dockerfile += 'ENTRYPOINT ["opencode"]\n'
+    build_dir = paths.runtimes_dir / profile_name
+    build_dir.mkdir(parents=True, exist_ok=True)
     (build_dir / "Dockerfile").write_text(dockerfile, encoding="utf-8")
 
     cp = run_capture(
