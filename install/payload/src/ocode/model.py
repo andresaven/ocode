@@ -126,15 +126,14 @@ def runtime_profiles() -> dict[str, RuntimeProfile]:
     image. The actual OpenCode version is upgraded in place with npm, so it is
     not part of the runtime tag.
     """
-    java_versions = {"java8": "8", "java11": "11", "java17": "17", "java21": "21"}
     return {
-        name: RuntimeProfile(
-            name,
+        f"java{java}": RuntimeProfile(
+            f"java{java}",
             f"ocode-runtime:{OPENCODE_VERSION}-maven{MAVEN_VERSION}-java{java}",
             java,
             True,
         )
-        for name, java in java_versions.items()
+        for java in ("8", "11", "17", "21", "25")
     }
 
 

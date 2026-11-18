@@ -1,6 +1,6 @@
 # ocode
 
-Versión de ocode: **0.13.0**.
+Versión de ocode: **0.14.0**.
 
 ocode es una aplicación con interfaz de terminal (TUI) para gestionar instancias
 de OpenCode en contenedores Linux, organizadas por proyecto y working copy.
@@ -99,7 +99,7 @@ En el menú principal, pulsa **Añadir**:
 
 1. Introduce la ruta de la working copy o selecciónala con **Navegar...**.
 2. Revisa el nombre del proyecto y la rama / working copy.
-3. Elige Java **8, 11, 17 o 21**.
+3. Elige Java **8, 11, 17, 21 o 25**.
 4. Selecciona el modo predeterminado y el puerto Web.
 5. Pulsa **Guardar** para abrir la gestión de la instancia.
 
@@ -284,16 +284,18 @@ imagen no incluye la versión de OpenCode: la imagen es la base de Java y Maven.
 | Java 11 | `ocode-runtime:2.0.24-maven3.9.9-java11` |
 | Java 17 | `ocode-runtime:2.0.24-maven3.9.9-java17` |
 | Java 21 | `ocode-runtime:2.0.24-maven3.9.9-java21` |
+| Java 25 | `ocode-runtime:2.0.24-maven3.9.9-java25` |
 
 Selecciona un perfil y pulsa **Construir seleccionado** para preparar su imagen.
 Todos incluyen Maven y npm. Los Dockerfiles se generan en
 `runtimes\<perfil>\` a partir de `ghcr.io/anomalyco/opencode:2.0.24`.
-Maven se fija en la versión **3.9.9** del repositorio `community` de Alpine
-3.21; Java y los demás paquetes proceden de la distribución de la imagen
-base. La etiqueta nueva evita reutilizar imágenes anteriores con otra versión
-de Maven. Para aplicar el cambio a una instancia existente, prepara su
-runtime desde **Runtimes** y usa **Guardar y recrear contenedor** en sus
-Ajustes; detenerla y arrancarla no cambia la imagen.
+Todos usan Maven **3.9.9**. Java 25 toma el JDK de Eclipse Temurin para Alpine
+y Maven de su imagen oficial; los demás perfiles obtienen Java de la
+distribución de la imagen base y Maven del repositorio `community` de Alpine
+3.21. También puedes construir el nuevo perfil con `ocode runtime build java25`.
+Para cambiar una instancia existente a Java 25, selecciona ese perfil en sus
+Ajustes y usa **Guardar y recrear contenedor**; detenerla y arrancarla no cambia
+la imagen.
 
 Al abrir una instancia que todavía no tiene contenedor, ocode construye
 automáticamente el runtime si su imagen no está disponible. La primera
